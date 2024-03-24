@@ -1,17 +1,19 @@
 import os
 import numpy as np
 from re import match
-from copy import copy
+# from copy import copy
+import random
 # import glob
 # import time
 # import supersuit as ss
 from env.delivery_env import DeliveryEnvironment
-from stable_baselines3 import PPO
+# from stable_baselines3 import PPO
 from pettingzoo.test import parallel_api_test
-from pettingzoo.utils import parallel_to_aec
-from stable_baselines3.common.evaluation import evaluate_policy
+# from pettingzoo.utils import parallel_to_aec
+# from stable_baselines3.common.evaluation import evaluate_policy
 from gymnasium.spaces import Box, Discrete, MultiDiscrete
 
+MAX_INT = 100
 
 if __name__ == "__main__":
     # temp = Box(low=-1, high=1, shape=(2, ))
@@ -56,18 +58,69 @@ if __name__ == "__main__":
     
     # warehouse_position = np.array([50, 50])
     # truck_position = copy(warehouse_position)
-    # uav_position = np.array([copy(truck_position) for _ in range(5)])
+    # uav_position = np.array([np.random.randint(10, 20, 2) for _ in range(5)])
     # observations = {
     #     possible_agents[i]: (
     #         np.concatenate([[warehouse_position, truck_position], uav_position]) if i == 0
-    #         else [warehouse_position, truck_position, uav_position[i%5]]
+    #         else [warehouse_position, truck_position, uav_position[(i-1)%5]]
     #     ) 
     #     for i in range(len(possible_agents))
     # }
     
     # print(observations)
     
+    # infos = {
+    # a: {"status": "dead"} if match("returning_uav", a)
+    #     else {"status": "alive"}
+    # for a in possible_agents
+    # }
+    # print(infos)
+    
+    # action_mask_a = None
+    # action_mask_b = None
+    # action_mask = None
+    
+    # action_mask = np.ones(8)
+    # action_mask_a = action_mask[:4]
+    # action_mask_b = action_mask[4:]
+    # action_masks = {
+    #     "a" : action_mask_a, 
+    #     "b" : action_mask_b
+    # }
+
+    # print(action_mask_a)
+    # print(action_mask_b)
+    # print(action_mask)
+    # print(action_masks)
+    
+    # action_mask_a[1] = 10
+    # action_mask_b[2] = 20
+    
+    # print(action_mask)
+    # print(action_masks)
+    
+    # action_masks = np.arange(1 + 20)
+    # customer_both_masks = action_masks[1 : 1 + 10]
+    # customer_truck_masks = action_masks[1 + 10 : 1 + 14]
+    # customer_uav_masks = action_masks[1 + 14 : 1 + 20]
+    
+    # print(action_masks)
+    # print(customer_both_masks)
+    # print(customer_truck_masks)
+    # print(customer_uav_masks)
+    # print(action_masks[1 : 1 + 14])
+    # print(np.concatenate((action_masks[1 : 1 + 10], action_masks[1 + 14 : 1 + 20])))
+    
+    # print(MAX_INT)
+    # print(2**20)
+    
+    # print(np.full(2, MAX_INT))
+
     # env = DeliveryEnvironment()
+    
+    # env.reset()
+    
+    # print(random.randint(5, 5))
     
     # parallel_api_test(env, num_cycles=1_000_000)
     

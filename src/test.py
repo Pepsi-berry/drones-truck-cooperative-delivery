@@ -99,6 +99,10 @@ if __name__ == "__main__":
     # print(action_mask)
     # print(action_masks)
     
+    # action_mask[7] = 40
+    # print(action_mask_b)
+    # print(action_masks)
+    
     # action_masks = np.arange(1 + 20)
     # customer_both_masks = action_masks[1 : 1 + 10]
     # customer_truck_masks = action_masks[1 + 10 : 1 + 14]
@@ -116,7 +120,7 @@ if __name__ == "__main__":
     
     # print(np.full(2, MAX_INT))
     
-    # name = "uav_2_2"
+    # name = "uav_0_2"
     # numbers = findall(r'\d+', name)
     # print(numbers)
     # numbers = [int(num) for num in numbers]
@@ -137,13 +141,16 @@ if __name__ == "__main__":
     #     }
     
     # print(infos)
-    # env = DeliveryEnvironment()
+    
+    # print("carried_uav".replace("returning", "carried"))
+    
+    env = DeliveryEnvironment()
     
     # env.reset()
     
     # print(random.randint(5, 5))
     
-    # parallel_api_test(env, num_cycles=1_000_000)
+    parallel_api_test(env, num_cycles=1_000)
     
     # log_path = os.path.join("training", "logs")
     

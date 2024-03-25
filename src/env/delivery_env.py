@@ -10,9 +10,19 @@ from pettingzoo import ParallelEnv
 
 MAX_INT = 2**20
 INVALID_ANGLE = 10
+# When the distance between the returning uav and the truck is less than this threshold, 
+# the return is considered complete.
+DIST_THRESHOLD = 100
+# rewards in various situations
+REWARD_DELIVERY = 20
+REWARD_VICTORY = 100
+REWARD_UAV_WRECK = -200
+REWARD_UAV_RETURNING = 1
 
 # it seems that wrapping truck and uav into classes would make programming significantly less difficult...
 # but when I realize this, it had gone much much too far...
+# The unimplemented parts in the scenario modeling are listed here:
+# *the range model of uavs is to be continue...*
 class DeliveryEnvironment(ParallelEnv):
     """The metadata holds environment constants.
     
@@ -35,7 +45,8 @@ class DeliveryEnvironment(ParallelEnv):
         # These attributes should not be changed after initialization except time_step.
         self.render_mode = render_mode
         
-        self.MAX_STEP = 1_000_000
+        # self.MAX_STEP = 1_000_000
+        self.MAX_STEP = 100_000
         self.step_len = 10
         self.time_step = None
         
@@ -262,6 +273,7 @@ class DeliveryEnvironment(ParallelEnv):
         # # Get dummy infos. Necessary for proper parallel_to_aec conversion
         
         # True means alive while False means dead
+        # "alive" means that the agent is taking action
         # "ready" means that decision-making is needed.
         self.infos = {
             a: {
@@ -285,7 +297,7 @@ class DeliveryEnvironment(ParallelEnv):
         target = None
         if action == 0:
             target = self.warehouse_position
-        elif 0 < action <= self.num_customer_truck:
+        elif 0 < action <= self.num_parcels_truck:
             target = self.customer_position_truck[action - 1]
         else:
             target = self.customer_position_both[action - self.num_customer_truck - 1]
@@ -364,11 +376,7 @@ class DeliveryEnvironment(ParallelEnv):
                 self.truck_path.append(np.array([self.truck_path[-1][0], target[1]]))
                 self.truck_path.append(target)
     
-    def truck_move(self, action):
-        # in the first movement, a refined path needs to be generated.
-        if not self.truck_path:
-            self.genarate_truck_path(action)
-
+    def truck_move(self):
         # target point x, y coordinate
         time_left = self.step_len
         while self.truck_path:
@@ -376,12 +384,16 @@ class DeliveryEnvironment(ParallelEnv):
                 break
             if abs(self.truck_position[0] + self.truck_position[1] - self.truck_path[0][0] - self.truck_path[0][1]) <= self.truck_velocity * time_left:
                 self.truck_position[0] = self.truck_path[0][0]
-                self.truck_position[1] = self.truck_path[1][1]
+                self.truck_position[1] = self.truck_path[0][1]
                 time_left -= abs(self.truck_position[0] + self.truck_position[1] - self.truck_path[0][0] - self.truck_path[0][1]) / float(self.truck_velocity)
                 self.truck_path.pop(0)
             elif self.truck_position[0] == self.truck_path[0][0]:
-                self.truck_position[1] += (time_left * self.truck_velocity if self.truck_position[1] < self.truck_path[0][1] 
-                                           else time_left * self.truck_velocity * (-1))
+                self.truck_position[1] += (int(time_left * self.truck_velocity) if self.truck_position[1] < self.truck_path[0][1] 
+                                           else int(time_left * self.truck_velocity * (-1)))
+                time_left = 0
+            else:
+                self.truck_position[0] += (int(time_left * self.truck_velocity) if self.truck_position[0] < self.truck_path[0][0] 
+                                           else int(time_left * self.truck_velocity) * (-1))
                 time_left = 0
         if not self.truck_path:
             return True
@@ -394,24 +406,26 @@ class DeliveryEnvironment(ParallelEnv):
         uav_info = [int(num) for num in uav_info]
         uav_no = uav_info[0] * 2 + uav_info[1]
         
+        # get the target coordinate
         target = None
         if action < self.num_customer_both:
             target = self.customer_position_both[action]
         else:
             target = self.customer_position_uav[action - self.num_customer_both]
-        if self.uav_target_dist == MAX_INT:
-            # get the target coordinate
-            self.uav_target_dist[uav_no] = np.sqrt(np.sum(np.square(self.uav_position - target)))
-            self.uav_target_angle_cos[uav_no] = (abs(target[0] - self.uav_position[0])) / self.uav_target_dist
-            self.uav_target_angle_sin[uav_no] = (abs(target[1] - self.uav_position[1])) / self.uav_target_dist
         
-        if self.uav_target_dist <= self.step_len * self.uav_velocity[uav_info[0]]:
+        # Initialize the moving angle and target for the first execution.
+        if self.uav_target_dist[uav_no] == MAX_INT:
+            self.uav_target_dist[uav_no] = np.sqrt(np.sum(np.square(self.uav_position[uav_no] - target)))
+            self.uav_target_angle_cos[uav_no] = (abs(target[0] - self.uav_position[uav_no][0])) / self.uav_target_dist[uav_no]
+            self.uav_target_angle_sin[uav_no] = (abs(target[1] - self.uav_position[uav_no][1])) / self.uav_target_dist[uav_no]
+        
+        if self.uav_target_dist[uav_no] <= self.step_len * self.uav_velocity[uav_info[0]]:
             self.uav_position[uav_no] = target
             return True
         else:
             self.uav_target_dist[uav_no] -= self.step_len * self.uav_velocity[uav_info[0]]
-            self.uav_position[uav_no][0] += self.uav_target_angle_cos * self.step_len * self.uav_velocity[uav_info[0]]
-            self.uav_position[uav_no][1] += self.uav_target_angle_sin * self.step_len * self.uav_velocity[uav_info[0]]
+            self.uav_position[uav_no][0] += int(self.uav_target_angle_cos[uav_no] * self.step_len * self.uav_velocity[uav_info[0]])
+            self.uav_position[uav_no][1] += int(self.uav_target_angle_sin[uav_no] * self.step_len * self.uav_velocity[uav_info[0]])
             return False
     
     
@@ -423,9 +437,27 @@ class DeliveryEnvironment(ParallelEnv):
         
         self.uav_position[uav_no][0] += np.cos(action) * self.step_len * self.uav_velocity[uav_info[0]]
         self.uav_position[uav_no][1] += np.sin(action) * self.step_len * self.uav_velocity[uav_info[0]]
+        
+        # typically, the uav will returning to the truck to get recovery and load
+        if np.sqrt(np.sum(np.square(self.uav_position[uav_no] - self.truck_position))) < DIST_THRESHOLD:
+            self.uav_position[uav_no] = copy(self.truck_position)
+            return 1
+        # The uav may also be returned directly to the warehouse, 
+        # but note that in this case, this uav will not be activated again.
+        elif np.sqrt(np.sum(np.square(self.uav_position[uav_no] - self.warehouse_position))) < DIST_THRESHOLD:
+            self.uav_position[uav_no] = copy(self.warehouse_position)
+            return -1
+        else:
+            return 0
             
     def updata_action_mask(self, agent, action):
-        pass
+        if match("truck", agent):
+            if action != 0:
+                self.truck_masks[action] = 0
+        elif match("carried", agent):
+            self.uav_masks[action] = 0
+        else:
+            pass
 
     def step(self, actions):
         """Takes in an action for the current agent (specified by agent_selection).
@@ -441,95 +473,121 @@ class DeliveryEnvironment(ParallelEnv):
 
         And any internal state used by observe() or render()
         """
+        rewards = {
+            "Global": -1, # get -1 reward every transitions to encourage faster delivery
+            }
         # Execute actions
         ####
-        # action mask is to be update...
         for agent in actions:
+            # processes to be performed here include. 
+            # - Update agent coordinate
+            # - Update action mask
+            # - Update agent state (i.e. infos)
+            # - Get the rewards including global rewards and returning rewards
             if match("truck", agent):
-                if self.truck_move(actions[agent]):
-                    self.infos["truck"]["IsReady"] = True
+                # in the first movement, a refined path needs to be generated.
+                if not self.truck_path:
+                    self.genarate_truck_path(actions[agent])
+                    self.updata_action_mask(agent, actions[agent])
+                if self.truck_move():
+                    self.infos[agent]["IsReady"] = True
+                    # calculate reward when arriving to target
+                    if actions[agent] == 0:
+                        if np.count_nonzero(self.action_masks) == 2:
+                            rewards["Global"] += REWARD_VICTORY
+                            self.agents.remove[agent]
+                    else:
+                        rewards["Global"] += REWARD_DELIVERY
+                        
                 else:
-                    self.infos["truck"]["IsReady"] = False
+                    self.infos[agent]["IsReady"] = False # a little bit redundant
             elif match("carried", agent):
+                uav_info = findall(r'\d+', agent)
+                uav_info = [int(num) for num in uav_info]
+                uav_no = uav_info[0] * 2 + uav_info[1]
+                
                 if actions[agent] != self.num_customer_uav:
-                    self.carried_uav_move(agent, actions[agent] - 1)
+                    if self.uav_target_dist[uav_no] == MAX_INT:
+                        self.updata_action_mask(agent, actions[agent])
+                    if self.carried_uav_move(agent, actions[agent]):
+                        self.infos[agent]["IsAlive"] = False
+                        self.infos[agent]["IsReady"] = False
+                        self.infos[agent.replace("carried", "returning")]["IsAlive"] = True
+                        self.infos[agent.replace("carried", "returning")]["IsReady"] = True
+                        self.agents.remove(agent)
+                        self.agents.append(agent.replace("carried", "returning"))
+                        # calculate reward when arriving to customer
+                        rewards["Global"] += REWARD_DELIVERY
+                    else:
+                        # can move to line-477 to execute with update_action_mask
+                        self.infos[agent]["IsReady"] = False 
+                # When uav doesn't launching, synchronize the coordinates of uav to truck.
+                else:
+                    self.uav_position[uav_no] = copy(self.truck_position)
+                    self.infos[agent]["IsReady"] = True # redundant?
             else:
-                self.returning_uav_move(agent, actions[agent])
-
-
-        # ~~Generate~~ update action masks
-        ####
-        
-        for a in actions:
-            if match("truck", actions[agent]):
-                if 0 < actions[agent] < self.num_customer_both:
-                    # self.action_masks[a] = 0
-                    pass
-        # prisoner_action_mask = np.ones(4, dtype=np.int8)
-        # if self.prisoner_x == 0:
-        #     prisoner_action_mask[0] = 0  # Block left movement
-        # elif self.prisoner_x == 6:
-        #     prisoner_action_mask[1] = 0  # Block right movement
-        # if self.prisoner_y == 0:
-        #     prisoner_action_mask[2] = 0  # Block down movement
-        # elif self.prisoner_y == 6:
-        #     prisoner_action_mask[3] = 0  # Block up movement
-
-        # guard_action_mask = np.ones(4, dtype=np.int8)
-        # if self.guard_x == 0:
-        #     guard_action_mask[0] = 0
-        # elif self.guard_x == 6:
-        #     guard_action_mask[1] = 0
-        # if self.guard_y == 0:
-        #     guard_action_mask[2] = 0
-        # elif self.guard_y == 6:
-        #     guard_action_mask[3] = 0
+                returning_result = self.returning_uav_move(agent, actions[agent])
+                if returning_result == 1:
+                    self.infos[agent]["IsAlive"] = False
+                    self.infos[agent]["IsReady"] = False
+                    self.infos[agent.replace("returning", "carried")]["IsAlive"] = True
+                    self.infos[agent.replace("returning", "carried")]["IsReady"] = True
+                    self.agents.remove(agent)
+                    self.agents.append(agent.replace("carried", "returning"))
+                    # calculate reward when arriving to customer
+                    rewards[agent] = 1
+                # when the uav return to warehouse directly, 
+                # it won't be re-activated as carried_uav
+                elif returning_result == -1:
+                    self.infos[agent]["IsAlive"] = False
+                    self.infos[agent]["IsReady"] = False
+                    self.agents.remove(agent)
+                    rewards[agent] = 1
+                else:
+                    self.infos[agent]["IsReady"] = True # redundant?
 
 
         # Check termination conditions
         ####
-        # terminations = {a: False for a in self.agents}
-        # rewards = {a: 0 for a in self.agents}
-        # if self.prisoner_x == self.guard_x and self.prisoner_y == self.guard_y:
-        #     rewards = {"prisoner": -1, "guard": 1}
-        #     terminations = {a: True for a in self.agents}
-        #     self.agents = []
-
-        # elif self.prisoner_x == self.escape_x and self.prisoner_y == self.escape_y:
-        #     rewards = {"prisoner": 1, "guard": -1}
-        #     terminations = {a: True for a in self.agents}
-        #     self.agents = []
+        terminations = {a: False for a in self.possible_agents}
+        if not self.agents:
+            terminations = {a: True for a in self.possible_agents}
 
         # Check truncation conditions (overwrites termination conditions)
         ####
-        # truncations = {"prisoner": False, "guard": False}
-        # if self.timestep > 100:
-        #     rewards = {"prisoner": 0, "guard": 0}
-        #     truncations = {"prisoner": True, "guard": True}
-        #     self.agents = []
-        # self.timestep += 1
+        truncations = {a: False for a in self.possible_agents}
+        if self.time_step > self.MAX_STEP:
+            truncations = {a: True for a in self.possible_agents}
+            self.agents = []
         self.time_step += 1
 
         # Get observations
         ####
-        # observation = (
-        #     self.prisoner_x + 7 * self.prisoner_y,
-        #     self.guard_x + 7 * self.guard_y,
-        #     self.escape_x + 7 * self.escape_y,
-        # )
-        # observations = {
-        #     "prisoner": {
-        #         "observation": observation,
-        #         "action_mask": prisoner_action_mask,
-        #     },
-        #     "guard": {"observation": observation, "action_mask": guard_action_mask},
-        # }
+        current_action_masks = {
+            agent: (self.truck_masks if match("truck", agent)
+                    else self.uav_masks if match("carried", agent)
+                    else None)
+            for agent in self.possible_agents
+        }
+        
+        # No difference from the observations and action_masks at reset()
+        observations = {
+            self.possible_agents[i]: {
+                "observation": (
+                np.row_stack([[self.warehouse_position, self.truck_position], self.uav_position, 
+                                 self.customer_position_both, self.customer_position_truck]) if i < self.num_truck 
+                else np.row_stack([[self.warehouse_position, self.truck_position, 
+                                    self.uav_position[(i - self.num_truck) % self.num_uavs]], 
+                                   self.customer_position_both, self.customer_position_uav])), 
+                "action_mask": current_action_masks[self.possible_agents[i]]
+                }
+            for i in range(len(self.possible_agents))
+        }
 
         # Get dummy infos (not used in this example)
         ####
-        # infos = {"prisoner": {}, "guard": {}}
-
-        # return observations, rewards, terminations, truncations, infos
+        
+        return observations, rewards, terminations, truncations, self.infos
 
     def render(self):
         """Renders the environment."""

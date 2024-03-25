@@ -1,7 +1,7 @@
 import functools
 import random
 from copy import copy
-from re import match
+from re import match, findall
 
 import numpy as np
 from gymnasium.spaces import Box, Discrete, MultiDiscrete
@@ -9,11 +9,15 @@ from gymnasium.spaces import Box, Discrete, MultiDiscrete
 from pettingzoo import ParallelEnv
 
 MAX_INT = 2**20
+INVALID_ANGLE = 10
 
+# it seems that wrapping truck and uav into classes would make programming significantly less difficult...
+# but when I realize this, it had gone much much too far...
 class DeliveryEnvironment(ParallelEnv):
     """The metadata holds environment constants.
-
+    
     The "name" metadata allows the environment to be pretty printed.
+    
     """
 
     metadata = {
@@ -36,26 +40,22 @@ class DeliveryEnvironment(ParallelEnv):
         self.time_step = None
         
         self.possible_agents = ["truck", 
-                                "carried_uav_1_1", "carried_uav_1_2", 
-                                "carried_uav_2_1", "carried_uav_2_2", 
-                                "carried_uav_2_3", "carried_uav_2_4", 
-                                "returning_uav_1_1", "returning_uav_1_2", 
-                                "returning_uav_2_1", "returning_uav_2_2", 
-                                "returning_uav_2_3", "returning_uav_2_4", 
+                                "carried_uav_0_0", "carried_uav_0_1", 
+                                "carried_uav_1_0", "carried_uav_1_1", 
+                                "carried_uav_1_2", "carried_uav_1_3", 
+                                "returning_uav_0_0", "returning_uav_0_1", 
+                                "returning_uav_1_0", "returning_uav_1_1", 
+                                "returning_uav_1_2", "returning_uav_1_3", 
                                 ]
         # uav parameters
         # unit here is m/s
         self.truck_velocity = 7
-        self.uav_1_velocity = 12
-        self.uav_2_velocity = 29
+        self.uav_velocity = np.array([12, 29])
         # unit here is kg
-        self.uav_1_capacity = 10
-        self.uav_2_capacity = 3.6
+        self.uav_capacity = np.array([10, 3.6])
         # unit here is m
-        # self.uav_1_range = 15_000
-        # self.uav_2_range = 20_000
-        self.uav_1_range = 10_000
-        self.uav_2_range = 15_000
+        # self.uav_range = 15_000, 20_000
+        self.uav_range = np.array([10_000, 15_000])
         
         self.num_truck = 1
         self.num_uavs = 6
@@ -75,13 +75,13 @@ class DeliveryEnvironment(ParallelEnv):
         self.grid_edge = 250 # m as unit here
         
         # The action space of the truck is, choosing a meaningful target point to go to
-        # that is warehouse point or customer points which truck can delivery
-        self.action_space_truck = Discrete(self.num_customer_truck + 1)
+        # that is warehouse point or customer points which truck can delivery:
+        # action_space_truck = Discrete(self.num_customer_truck + 1)
         # The action space of the carried uav is similar to truck
-        # action_space_uav_carried[num_customer_uav + 1] is set to empty action
-        self.action_space_uav_carried = Discrete(self.num_customer_uav + 1)
-        # the action space of the returning uav is chasing the truck in any direction
-        self.action_space_uav_returning = Box(low=0, high=np.pi, shape=(1, ))
+        # action_space_uav_carried[num_customer_uav + 1] is set to empty action:
+        # action_space_uav_carried = Discrete(self.num_customer_uav + 1)
+        # the action space of the returning uav is chasing the truck in any direction:
+        # action_space_uav_returning = Box(low=0, high=2*np.pi, shape=(1, ))
         self.action_spaces = {
             agent: (
                 Discrete(self.num_customer_truck + 1) if match("truck", agent) 
@@ -97,8 +97,10 @@ class DeliveryEnvironment(ParallelEnv):
         self.agents = None
         self.truck_position = None
         self.uav_position = None
-        # variables used to help representing the movement of the agent in step()
+        # variables used to help representing the movements of the agent in step()
         self.uav_target_dist = None
+        self.uav_target_angle_sin = None
+        self.uav_target_angle_cos = None
         self.truck_path = None
 
         # The following three *_mask will be assigned as slices of action_mask. 
@@ -109,6 +111,9 @@ class DeliveryEnvironment(ParallelEnv):
         # self.customer_uav_masks = None
         self.truck_masks = None
         self.uav_masks = None
+        
+        # infos contains information about the state of the agents.
+        self.infos = None
         
         
         ##########################################################################################
@@ -181,9 +186,9 @@ class DeliveryEnvironment(ParallelEnv):
         self.time_step = 0
         # Initially, all UAVs are in state of loaded in truck
         self.agents = ["truck", 
-                       "carried_uav_1_1", "carried_uav_1_2", 
-                       "carried_uav_2_1", "carried_uav_2_2", 
-                       "carried_uav_2_3", "carried_uav_2_4", 
+                       "carried_uav_0_0", "carried_uav_0_1", 
+                       "carried_uav_1_0", "carried_uav_1_1", 
+                       "carried_uav_1_2", "carried_uav_1_3", 
                        ]
         # The warehouse is located in the center of the map
         self.warehouse_position = np.array([self.map_size / 2, self.map_size / 2])
@@ -207,6 +212,8 @@ class DeliveryEnvironment(ParallelEnv):
         # Initially, the target points of all agents are not determined
         # So the uav_taeget_dist is set to inf and the truck path is set to empty
         self.uav_target_dist = np.full(self.num_uavs, MAX_INT)
+        self.uav_target_angle_cos = np.full(self.num_uavs, INVALID_ANGLE)
+        self.uav_target_angle_sin = np.full(self.num_uavs, INVALID_ANGLE)
         self.truck_path = []
         
         # parcel weights probability distribution: 
@@ -255,13 +262,20 @@ class DeliveryEnvironment(ParallelEnv):
         # # Get dummy infos. Necessary for proper parallel_to_aec conversion
         
         # True means alive while False means dead
-        infos = {
-            a: False if match("returning_uav", a)
-                else True
+        # "ready" means that decision-making is needed.
+        self.infos = {
+            a: {
+                "IsAlive": False, 
+                "IsReady": False
+                } if match("returning_uav", a)
+                else {
+                    "IsAlive": True, 
+                    "IsReady": True
+                }
             for a in self.possible_agents
             }
 
-        return observations, infos
+        return observations, self.infos
     
     # When the truck performs a new action, it first generates a refined path through genarate_truck_path(),
     # and then moves in truck_move() according to the generated path before reaching the target 
@@ -351,6 +365,10 @@ class DeliveryEnvironment(ParallelEnv):
                 self.truck_path.append(target)
     
     def truck_move(self, action):
+        # in the first movement, a refined path needs to be generated.
+        if not self.truck_path:
+            self.genarate_truck_path(action)
+
         # target point x, y coordinate
         time_left = self.step_len
         while self.truck_path:
@@ -371,11 +389,41 @@ class DeliveryEnvironment(ParallelEnv):
             return False
                 
     def carried_uav_move(self, uav, action):
-        pass
+        # get the uav info: kind and no.
+        uav_info = findall(r'\d+', uav)
+        uav_info = [int(num) for num in uav_info]
+        uav_no = uav_info[0] * 2 + uav_info[1]
+        
+        target = None
+        if action < self.num_customer_both:
+            target = self.customer_position_both[action]
+        else:
+            target = self.customer_position_uav[action - self.num_customer_both]
+        if self.uav_target_dist == MAX_INT:
+            # get the target coordinate
+            self.uav_target_dist[uav_no] = np.sqrt(np.sum(np.square(self.uav_position - target)))
+            self.uav_target_angle_cos[uav_no] = (abs(target[0] - self.uav_position[0])) / self.uav_target_dist
+            self.uav_target_angle_sin[uav_no] = (abs(target[1] - self.uav_position[1])) / self.uav_target_dist
+        
+        if self.uav_target_dist <= self.step_len * self.uav_velocity[uav_info[0]]:
+            self.uav_position[uav_no] = target
+            return True
+        else:
+            self.uav_target_dist[uav_no] -= self.step_len * self.uav_velocity[uav_info[0]]
+            self.uav_position[uav_no][0] += self.uav_target_angle_cos * self.step_len * self.uav_velocity[uav_info[0]]
+            self.uav_position[uav_no][1] += self.uav_target_angle_sin * self.step_len * self.uav_velocity[uav_info[0]]
+            return False
+    
     
     def returning_uav_move(self, uav, action):
-        pass
-    
+        # get the uav info: kind and no.
+        uav_info = findall(r'\d+', uav)
+        uav_info = [int(num) for num in uav_info]
+        uav_no = uav_info[0] * 2 + uav_info[1]
+        
+        self.uav_position[uav_no][0] += np.cos(action) * self.step_len * self.uav_velocity[uav_info[0]]
+        self.uav_position[uav_no][1] += np.sin(action) * self.step_len * self.uav_velocity[uav_info[0]]
+            
     def updata_action_mask(self, agent, action):
         pass
 
@@ -395,11 +443,15 @@ class DeliveryEnvironment(ParallelEnv):
         """
         # Execute actions
         ####
+        # action mask is to be update...
         for agent in actions:
             if match("truck", agent):
-                self.truck_move(actions[agent]) # processing the return is to be done here...
+                if self.truck_move(actions[agent]):
+                    self.infos["truck"]["IsReady"] = True
+                else:
+                    self.infos["truck"]["IsReady"] = False
             elif match("carried", agent):
-                if actions[agent] != 0:
+                if actions[agent] != self.num_customer_uav:
                     self.carried_uav_move(agent, actions[agent] - 1)
             else:
                 self.returning_uav_move(agent, actions[agent])

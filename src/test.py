@@ -1,6 +1,6 @@
 import os
 import numpy as np
-from re import match
+from re import match, findall
 # from copy import copy
 import random
 # import glob
@@ -115,7 +115,28 @@ if __name__ == "__main__":
     # print(2**20)
     
     # print(np.full(2, MAX_INT))
+    
+    # name = "uav_2_2"
+    # numbers = findall(r'\d+', name)
+    # print(numbers)
+    # numbers = [int(num) for num in numbers]
+    # print(numbers)
+    
+    # print(np.cos(2*np.pi))
 
+    # infos = {
+    #     a: {
+    #         "IsAlive": False, 
+    #         "IsReady": False
+    #         } if match("returning_uav", a)
+    #         else {
+    #             "IsAlive": True, 
+    #             "IsReady": True
+    #         }
+    #     for a in possible_agents
+    #     }
+    
+    # print(infos)
     # env = DeliveryEnvironment()
     
     # env.reset()

@@ -21,6 +21,10 @@ REWARD_UAV_RETURNING = 1
 
 # it seems that wrapping truck and uav into classes would make programming significantly less difficult...
 # but when I realize this, it had gone much much too far...
+
+# In once decision, there may be more than one uav selected the same customer as the target point
+# special treatment of this needs to be refined(maybe AEV is more suitable? :(
+
 # The unimplemented parts in the scenario modeling are listed here:
 # *the range model of uavs is to be continue...*
 class DeliveryEnvironment(ParallelEnv):
@@ -31,7 +35,7 @@ class DeliveryEnvironment(ParallelEnv):
     """
 
     metadata = {
-        "render_mode": [None],
+        "render_mode": [None, "human"],
         "name": "delivery_environment_v0",
     }
 
@@ -109,6 +113,7 @@ class DeliveryEnvironment(ParallelEnv):
         self.truck_position = None
         self.uav_position = None
         # variables used to help representing the movements of the agent in step()
+        self.uav_dist = None
         self.uav_target_dist = None
         self.uav_target_angle_sin = None
         self.uav_target_angle_cos = None
@@ -222,9 +227,10 @@ class DeliveryEnvironment(ParallelEnv):
         
         # Initially, the target points of all agents are not determined
         # So the uav_taeget_dist is set to inf and the truck path is set to empty
+        self.uav_dist = np.full(self.num_uavs, -1)
         self.uav_target_dist = np.full(self.num_uavs, MAX_INT)
-        self.uav_target_angle_cos = np.full(self.num_uavs, INVALID_ANGLE)
-        self.uav_target_angle_sin = np.full(self.num_uavs, INVALID_ANGLE)
+        self.uav_target_angle_cos = np.full(self.num_uavs, INVALID_ANGLE, dtype=float)
+        self.uav_target_angle_sin = np.full(self.num_uavs, INVALID_ANGLE, dtype=float)
         self.truck_path = []
         
         # parcel weights probability distribution: 
@@ -406,6 +412,10 @@ class DeliveryEnvironment(ParallelEnv):
         uav_info = [int(num) for num in uav_info]
         uav_no = uav_info[0] * 2 + uav_info[1]
         
+        # Recovering an action in progress
+        if action is None:
+            action = self.uav_dist[uav_no]
+        
         # get the target coordinate
         target = None
         if action < self.num_customer_both:
@@ -415,9 +425,10 @@ class DeliveryEnvironment(ParallelEnv):
         
         # Initialize the moving angle and target for the first execution.
         if self.uav_target_dist[uav_no] == MAX_INT:
+            self.uav_dist[uav_no] = action
             self.uav_target_dist[uav_no] = np.sqrt(np.sum(np.square(self.uav_position[uav_no] - target)))
-            self.uav_target_angle_cos[uav_no] = (abs(target[0] - self.uav_position[uav_no][0])) / self.uav_target_dist[uav_no]
-            self.uav_target_angle_sin[uav_no] = (abs(target[1] - self.uav_position[uav_no][1])) / self.uav_target_dist[uav_no]
+            self.uav_target_angle_cos[uav_no] = float(target[0] - self.uav_position[uav_no][0]) / self.uav_target_dist[uav_no]
+            self.uav_target_angle_sin[uav_no] = float(target[1] - self.uav_position[uav_no][1]) / self.uav_target_dist[uav_no]
         
         if self.uav_target_dist[uav_no] <= self.step_len * self.uav_velocity[uav_info[0]]:
             self.uav_position[uav_no] = target
@@ -435,8 +446,10 @@ class DeliveryEnvironment(ParallelEnv):
         uav_info = [int(num) for num in uav_info]
         uav_no = uav_info[0] * 2 + uav_info[1]
         
-        self.uav_position[uav_no][0] += np.cos(action) * self.step_len * self.uav_velocity[uav_info[0]]
-        self.uav_position[uav_no][1] += np.sin(action) * self.step_len * self.uav_velocity[uav_info[0]]
+        # print(int(np.cos(action) * self.step_len * self.uav_velocity[uav_info[0]]))
+        # print(action)
+        self.uav_position[uav_no][0] += int(np.cos(action) * self.step_len * self.uav_velocity[uav_info[0]])
+        self.uav_position[uav_no][1] += int(np.sin(action) * self.step_len * self.uav_velocity[uav_info[0]])
         
         # typically, the uav will returning to the truck to get recovery and load
         if np.sqrt(np.sum(np.square(self.uav_position[uav_no] - self.truck_position))) < DIST_THRESHOLD:
@@ -478,12 +491,12 @@ class DeliveryEnvironment(ParallelEnv):
             }
         # Execute actions
         ####
+        # processes to be performed here include. 
+        # - Update agent coordinate
+        # - Update action mask
+        # - Update agent state (i.e. infos)
+        # - Get the rewards including global rewards and returning rewards
         for agent in actions:
-            # processes to be performed here include. 
-            # - Update agent coordinate
-            # - Update action mask
-            # - Update agent state (i.e. infos)
-            # - Get the rewards including global rewards and returning rewards
             if match("truck", agent):
                 # in the first movement, a refined path needs to be generated.
                 if not self.truck_path:
@@ -501,7 +514,8 @@ class DeliveryEnvironment(ParallelEnv):
                         
                 else:
                     self.infos[agent]["IsReady"] = False # a little bit redundant
-            elif match("carried", agent):
+        for agent in actions:
+            if match("carried", agent):
                 uav_info = findall(r'\d+', agent)
                 uav_info = [int(num) for num in uav_info]
                 uav_no = uav_info[0] * 2 + uav_info[1]
@@ -514,8 +528,14 @@ class DeliveryEnvironment(ParallelEnv):
                         self.infos[agent]["IsReady"] = False
                         self.infos[agent.replace("carried", "returning")]["IsAlive"] = True
                         self.infos[agent.replace("carried", "returning")]["IsReady"] = True
+                        # print(self.agents)
                         self.agents.remove(agent)
                         self.agents.append(agent.replace("carried", "returning"))
+                        # print("**")
+                        # print(agent)
+                        # print(agent.replace("carried", "returning"))
+                        # print("**")
+                        # print(self.agents)
                         # calculate reward when arriving to customer
                         rewards["Global"] += REWARD_DELIVERY
                     else:
@@ -525,7 +545,7 @@ class DeliveryEnvironment(ParallelEnv):
                 else:
                     self.uav_position[uav_no] = copy(self.truck_position)
                     self.infos[agent]["IsReady"] = True # redundant?
-            else:
+            elif match("returning", agent):
                 returning_result = self.returning_uav_move(agent, actions[agent])
                 if returning_result == 1:
                     self.infos[agent]["IsAlive"] = False
@@ -533,7 +553,7 @@ class DeliveryEnvironment(ParallelEnv):
                     self.infos[agent.replace("returning", "carried")]["IsAlive"] = True
                     self.infos[agent.replace("returning", "carried")]["IsReady"] = True
                     self.agents.remove(agent)
-                    self.agents.append(agent.replace("carried", "returning"))
+                    self.agents.append(agent.replace("returning", "carried"))
                     # calculate reward when arriving to customer
                     rewards[agent] = 1
                 # when the uav return to warehouse directly, 
@@ -549,15 +569,15 @@ class DeliveryEnvironment(ParallelEnv):
 
         # Check termination conditions
         ####
-        terminations = {a: False for a in self.possible_agents}
+        terminations = {a: False for a in self.agents}
         if not self.agents:
-            terminations = {a: True for a in self.possible_agents}
+            terminations = {a: True for a in self.agents}
 
         # Check truncation conditions (overwrites termination conditions)
         ####
-        truncations = {a: False for a in self.possible_agents}
+        truncations = {a: False for a in self.agents}
         if self.time_step > self.MAX_STEP:
-            truncations = {a: True for a in self.possible_agents}
+            truncations = {a: True for a in self.agents}
             self.agents = []
         self.time_step += 1
 
@@ -591,9 +611,16 @@ class DeliveryEnvironment(ParallelEnv):
 
     def render(self):
         """Renders the environment."""
+        # currently, render used mainly in testing rather than visualization :)
+        if self.render_mode == None:
+            return
+        elif self.render_mode == "human":
+            # print(self.infos)
+            # print(observations)
+            print(self.uav_position[0])
+            # print(self.truck_position)
         # grid = np.zeros((7, 7))
         # grid[self.prisoner_y, self.prisoner_x] = "P"
         # grid[self.guard_y, self.guard_x] = "G"
         # grid[self.escape_y, self.escape_x] = "E"
         # print(f"{grid} \n")
-        pass

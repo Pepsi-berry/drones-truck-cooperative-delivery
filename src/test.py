@@ -8,12 +8,26 @@ import random
 # import supersuit as ss
 from env.delivery_env import DeliveryEnvironment
 # from stable_baselines3 import PPO
-from pettingzoo.test import parallel_api_test
+# from pettingzoo.test import parallel_api_test
 # from pettingzoo.utils import parallel_to_aec
 # from stable_baselines3.common.evaluation import evaluate_policy
 from gymnasium.spaces import Box, Discrete, MultiDiscrete
+from pettingzoo.utils.env import ActionType, AgentID, ObsType, ParallelEnv
 
 MAX_INT = 100
+
+def sample_action(
+    env: ParallelEnv[AgentID, ObsType, ActionType],
+    obs: dict[AgentID, ObsType],
+    agent: AgentID,
+) -> ActionType:
+    agent_obs = obs[agent]
+    if isinstance(agent_obs, dict) and "action_mask" in agent_obs:
+        legal_actions = np.flatnonzero(agent_obs["action_mask"])
+        if len(legal_actions) == 0:
+            return 0
+        return random.choice(legal_actions)
+    return env.action_space(agent).sample()
 
 if __name__ == "__main__":
     # temp = Box(low=-1, high=1, shape=(2, ))
@@ -144,27 +158,44 @@ if __name__ == "__main__":
     
     # print("carried_uav".replace("returning", "carried"))
     
-    env = DeliveryEnvironment()
+    env = DeliveryEnvironment(render_mode="human")
     
     # env.reset()
     
     # print(random.randint(5, 5))
     
-    parallel_api_test(env, num_cycles=1_000)
+    # parallel_api_test(env, num_cycles=1_000)
     
     # log_path = os.path.join("training", "logs")
     
-    # observations, infos = env.reset()
-    # total_rewards = {agent : 0 for agent in env.agents}
+    # f = open("src/env/log.txt", "w")
+    # f.write('Hello, world!')
+    # f.close()
+    observations, infos = env.reset()
+    total_rewards = None
+    time_step = 0
+    while env.agents:
+        # this is where you would insert your policy
+        actions = {
+            # here situate the policy
+            agent: (sample_action(env, observations, agent) if infos[agent]["IsReady"] == True
+                    else None)
+            for agent in env.agents
+        }
 
-    # while env.agents:
-    #     # this is where you would insert your policy
-    #     actions = {agent: env.action_space(agent).sample() for agent in env.agents}
-
-    #     observations, rewards, terminations, truncations, infos = env.step(actions)
-    #     total_rewards["prisoner"] = rewards["prisoner"]
-    #     total_rewards["guard"] = rewards["guard"]
+        observations, rewards, terminations, truncations, infos = env.step(actions)
+        
+        # if rewards["Global"] != -1:
+        #     print("rewards: " + str(rewards["Global"]))
+        
+        if time_step <= 100:
+            env.render()
+        
+        time_step += 1
+        # total_rewards["prisoner"] = rewards["prisoner"]
+        # total_rewards["guard"] = rewards["guard"]
     
+    print("pass")
     # print(total_rewards)
     # env.close()
 
@@ -193,4 +224,3 @@ if __name__ == "__main__":
 # env.reset()
 
 # env.render()
-

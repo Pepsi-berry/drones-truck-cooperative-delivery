@@ -1,3 +1,4 @@
+import os
 import functools
 import random
 from copy import copy
@@ -7,6 +8,7 @@ import numpy as np
 from gymnasium.spaces import Box, Discrete, MultiDiscrete
 
 from pettingzoo import ParallelEnv
+import pygame
 
 MAX_INT = 2**20
 INVALID_ANGLE = 10
@@ -48,6 +50,9 @@ class DeliveryEnvironment(ParallelEnv):
         ##########################################################################################
         # These attributes should not be changed after initialization except time_step.
         self.render_mode = render_mode
+        self.screen = None
+        if self.render_mode == "human":
+            self.clock = pygame.time.Clock()
         
         # self.MAX_STEP = 1_000_000
         self.MAX_STEP = 100_000
@@ -86,7 +91,7 @@ class DeliveryEnvironment(ParallelEnv):
         self.weight_probabilities = [0.8, 0.1, 0.1]
         
         # map parameters
-        self.map_size = 15_000 # m as unit here
+        self.map_size = 10_000 # m as unit here
         self.grid_edge = 250 # m as unit here
         
         # The action space of the truck is, choosing a meaningful target point to go to
@@ -152,8 +157,8 @@ class DeliveryEnvironment(ParallelEnv):
         # 1(warehouse) + 1(truck) + 1(uav itself)
         self.observation_spaces = {
             agent: (
-                MultiDiscrete(np.full([(1 + 1 + self.num_uavs + self.num_customer_truck), 2], 15_001)) if match("truck", agent) 
-                else MultiDiscrete(np.full([(1 + 1 + 1 + self.num_customer_uav), 2], 15_001))
+                MultiDiscrete(np.full([(1 + 1 + self.num_uavs + self.num_customer_truck), 2], self.map_size + 1)) if match("truck", agent) 
+                else MultiDiscrete(np.full([(1 + 1 + 1 + self.num_customer_uav), 2], self.map_size + 1))
             ) 
             for agent in self.possible_agents
         }
@@ -614,13 +619,75 @@ class DeliveryEnvironment(ParallelEnv):
         # currently, render used mainly in testing rather than visualization :)
         if self.render_mode == None:
             return
-        elif self.render_mode == "human":
-            # print(self.infos)
-            # print(observations)
-            print(self.uav_position[0])
-            # print(self.truck_position)
-        # grid = np.zeros((7, 7))
-        # grid[self.prisoner_y, self.prisoner_x] = "P"
-        # grid[self.guard_y, self.guard_x] = "G"
-        # grid[self.escape_y, self.escape_x] = "E"
-        # print(f"{grid} \n")
+        
+        screen_width = 1000
+        screen_height = 1000
+        grid_width = screen_width / 40
+        grid_height = screen_height / 40
+        scale = self.map_size / screen_width
+        
+        # As an offset to the coordinates of objects in the scene
+        position_bias = np.array([grid_width, grid_height])
+        
+        if self.screen == None:
+            pygame.init()
+            if self.render_mode == "human":
+                pygame.display.set_caption("Truck & UAVs")
+                self.screen = pygame.display.set_mode((screen_width, screen_height))
+        
+        # Load the texture used to render the scene
+        map_image = get_image(os.path.join("img", "Map5.png"))
+        map_image = pygame.transform.scale(map_image, (screen_width, screen_height))
+        warehouse_image = get_image(os.path.join("img", "Warehouse.png"))
+        warehouse_image = pygame.transform.scale(warehouse_image, (grid_width * 0.8, grid_height * 0.8))
+        truck_image = get_image(os.path.join("img", "Truck.png"))
+        truck_image = pygame.transform.scale(truck_image, (grid_width * 0.8, grid_height * 0.8))
+        uav_image = get_image(os.path.join("img", "UAV.png"))
+        uav_image = pygame.transform.scale(uav_image, (grid_width * 0.6, grid_height * 0.6))
+        customer_both_image = get_image(os.path.join("img", "CustomerBoth.png"))
+        customer_both_image = pygame.transform.scale(customer_both_image, (grid_width * 0.8, grid_height * 0.8))
+        customer_truck_image = get_image(os.path.join("img", "CustomerTruck.png"))
+        customer_truck_image = pygame.transform.scale(customer_truck_image, (grid_width * 0.8, grid_height * 0.8))
+        customer_uav_image = get_image(os.path.join("img", "CustomerUAV.png"))
+        customer_uav_image = pygame.transform.scale(customer_uav_image, (grid_width * 0.8, grid_height * 0.8))
+        
+        self.screen.blit(map_image, (0, 0))
+        
+        # There is a scale between simulation coordinates and rendering coordinates, here it is 10:1
+        self.screen.blit(warehouse_image, self.warehouse_position / scale - position_bias * 0.4)
+        for customer in self.customer_position_both:
+            self.screen.blit(customer_both_image, customer / scale - position_bias * 0.4)
+        for customer in self.customer_position_truck:
+            self.screen.blit(customer_truck_image, customer / scale - position_bias * 0.4)
+        for customer in self.customer_position_uav:
+            self.screen.blit(customer_uav_image, customer / scale - position_bias * 0.4)
+        
+        self.screen.blit(truck_image, self.truck_position / scale - position_bias * 0.4)
+        for uav in self.uav_position:
+            self.screen.blit(uav_image, uav / scale - position_bias * 0.3)
+        
+        if self.render_mode == "human":
+            pygame.event.pump()
+            pygame.display.update()
+            self.clock.tick(2)
+            # # print(self.infos)
+            # # print(observations)
+            # print(self.uav_position[0])
+            # # print(self.truck_position)
+        
+    def close(self):
+        if self.screen is not None:
+            pygame.quit()
+            self.screen = None
+        return super().close()
+
+
+def get_image(path):
+    from os import path as os_path
+    import pygame
+
+    cwd = os_path.dirname(__file__)
+    image = pygame.image.load(cwd + "/" + path)
+    sfc = pygame.Surface(image.get_size(), flags=pygame.SRCALPHA)
+    sfc.blit(image, (0, 0))
+    return sfc

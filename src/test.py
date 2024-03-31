@@ -172,17 +172,23 @@ if __name__ == "__main__":
     # f.write('Hello, world!')
     # f.close()
     observations, infos = env.reset()
+    env.render()
     total_rewards = None
     time_step = 0
-    while env.agents:
+    # for _ in range(20):
+    #     print(type(env.action_space("returning_uav_1_1").sample()))
+    
+    for _ in range(50):
         # this is where you would insert your policy
         actions = {
-            # here situate the policy
-            agent: (sample_action(env, observations, agent) if infos[agent]["IsReady"] == True
+            # here is situated the policy
+            agent: (sample_action(env, observations, agent) if infos[agent]["IsReady"] == True and not match("return", agent)
+                    else env.action_space(agent).sample() if infos[agent]["IsReady"] == True and match("return", agent)
                     else None)
             for agent in env.agents
         }
-
+        
+        
         observations, rewards, terminations, truncations, infos = env.step(actions)
         
         # if rewards["Global"] != -1:
@@ -192,9 +198,12 @@ if __name__ == "__main__":
             env.render()
         
         time_step += 1
+    
+    
         # total_rewards["prisoner"] = rewards["prisoner"]
         # total_rewards["guard"] = rewards["guard"]
     
+    env.close()
     print("pass")
     # print(total_rewards)
     # env.close()

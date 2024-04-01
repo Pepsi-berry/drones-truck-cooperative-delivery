@@ -172,11 +172,15 @@ if __name__ == "__main__":
     # f.write('Hello, world!')
     # f.close()
     observations, infos = env.reset()
+    # print(env.uav_battery_remaining)
     env.render()
     total_rewards = None
     time_step = 0
     # for _ in range(20):
     #     print(type(env.action_space("returning_uav_1_1").sample()))
+    # print(env.parcels_weight)
+    # for agent_obs in observations:
+    #     print(observations[agent_obs]["action_mask"])
     
     for _ in range(50):
         # this is where you would insert your policy
@@ -185,10 +189,12 @@ if __name__ == "__main__":
             agent: (sample_action(env, observations, agent) if infos[agent]["IsReady"] == True and not match("return", agent)
                     else env.action_space(agent).sample() if infos[agent]["IsReady"] == True and match("return", agent)
                     else None)
+            # agent: sample_action(env, observations, agent)
             for agent in env.agents
         }
         
-        
+        # print(env.uav_battery_remaining)
+        # print(env.parcels_weight)
         observations, rewards, terminations, truncations, infos = env.step(actions)
         
         # if rewards["Global"] != -1:

@@ -264,11 +264,6 @@ class DeliveryEnvironment(ParallelEnv):
                 uav_no = uav_info[0] * self.num_uavs_0 + uav_info[1]
                 self.uav_battery_remaining[uav_no] = self.uav_range[uav_info[0]]
         
-        # self.uav_position = {
-        #     uav: copy(self.truck_position) 
-        #     for uav in self.possible_agents
-        #     if not match("truck", uav)
-        #     }
         
         # Distribution of action space in action_masks: 
         # to warehouse —— to customer_truck —— to customer_both —— to customer_uav —— uav do nothing
@@ -715,10 +710,6 @@ class DeliveryEnvironment(ParallelEnv):
             pygame.event.pump()
             pygame.display.update()
             self.clock.tick(2)
-            # # print(self.infos)
-            # # print(observations)
-            # print(self.uav_position[0])
-            # # print(self.truck_position)
         
     def close(self):
         if self.screen is not None:

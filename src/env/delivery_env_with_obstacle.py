@@ -29,7 +29,7 @@ REWARD_UAV_RETURNING = 1
 
 # The unimplemented parts in the scenario modeling are listed here:
 # *the range model of uavs is to be continue...*
-class DeliveryEnvironment(ParallelEnv):
+class DeliveryEnvironmentWithObstacle(ParallelEnv):
     """The metadata holds environment constants.
     
     The "name" metadata allows the environment to be pretty printed.
@@ -38,7 +38,7 @@ class DeliveryEnvironment(ParallelEnv):
 
     metadata = {
         "render_mode": [None, "human"],
-        "name": "delivery_environment_v0",
+        "name": "delivery_environment_v2",
     }
 
     def __init__(self, render_mode=None):
@@ -97,13 +97,10 @@ class DeliveryEnvironment(ParallelEnv):
         self.grid_edge = 250 # m as unit here
         
         # The action space of the truck is, choosing a meaningful target point to go to
-        # that is warehouse point or customer points which truck can delivery:
-        # action_space_truck = Discrete(self.num_customer_truck + 1)
+        # that is warehouse point or customer points which truck can delivery
         # The action space of the carried uav is similar to truck
-        # action_space_uav_carried[num_customer_uav + 1] is set to empty action:
-        # action_space_uav_carried = Discrete(self.num_customer_uav + 1)
-        # the action space of the returning uav is chasing the truck in any direction:
-        # action_space_uav_returning = Box(low=0, high=2*np.pi, shape=(1, ))
+        # action_space_uav_carried[num_customer_uav + 1] is set to empty action
+        # the action space of the returning uav is chasing the truck in any direction
         self.action_spaces = {
             agent: (
                 Discrete(self.num_customer_truck + 1) if match("truck", agent) 
@@ -146,6 +143,10 @@ class DeliveryEnvironment(ParallelEnv):
         # through invalid action masks to prevent the agent from going to the customer point,
         # where the delivery has been completed
         self.action_masks = None
+        # Use *_load_mask and uav_mask to multiply bitwise to get the final uav action mask
+        self.uav0_load_masks = None
+        self.uav1_load_masks = None
+        
         self.warehouse_position = None
         self.customer_position_truck = None
         self.customer_position_uav = None
@@ -272,14 +273,17 @@ class DeliveryEnvironment(ParallelEnv):
         self.action_masks = np.ones(1 + self.num_parcels + 1)
         self.truck_masks = self.action_masks[: 1 + self.num_customer_truck]
         self.uav_masks = self.action_masks[1 + self.num_parcels_truck : 1 + self.num_parcels + 1]
-        
-        uav_0_masks = copy(self.uav_masks)
-        uav_1_masks = copy(self.uav_masks)
+        self.uav0_load_masks = np.ones(1 + self.num_customer_uav)
+        self.uav1_load_masks = np.ones(1 + self.num_customer_uav)
+
         for i in range(self.num_customer_uav):
             if self.parcels_weight[i] > self.uav_capacity[0]:
-                uav_0_masks[i] = 0
+                self.uav0_load_masks[i] = 0
             if self.parcels_weight[i] > self.uav_capacity[1]:
-                uav_1_masks[i] = 0
+                self.uav1_load_masks[i] = 0
+        
+        uav_0_masks = self.uav0_load_masks * self.uav_masks
+        uav_1_masks = self.uav1_load_masks * self.uav_masks
 
         current_action_masks = {
             agent: (self.truck_masks if match("truck", agent)
@@ -628,9 +632,13 @@ class DeliveryEnvironment(ParallelEnv):
 
         # Get observations
         ####
+        uav_0_masks = self.uav0_load_masks * self.uav_masks
+        uav_1_masks = self.uav1_load_masks * self.uav_masks
+
         current_action_masks = {
             agent: (self.truck_masks if match("truck", agent)
-                    else self.uav_masks if match("carried", agent)
+                    else uav_0_masks if match("carried_uav_0", agent)
+                    else uav_1_masks if match("carried_uav_1", agent)
                     else None)
             for agent in self.possible_agents
         }

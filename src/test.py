@@ -210,6 +210,8 @@ if __name__ == "__main__":
         # total_rewards["guard"] = rewards["guard"]
     
     env.close()
+    # for agent_obs in observations:
+    #     print(observations[agent_obs]["action_mask"])
     print("pass")
     # print(total_rewards)
     # env.close()

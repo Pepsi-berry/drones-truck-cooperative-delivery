@@ -6,7 +6,8 @@ import random
 # import glob
 # import time
 # import supersuit as ss
-from env.delivery_env import DeliveryEnvironment
+# from env.delivery_env import DeliveryEnvironment
+from env.delivery_env_with_obstacle import DeliveryEnvironmentWithObstacle
 # from stable_baselines3 import PPO
 # from pettingzoo.test import parallel_api_test
 # from pettingzoo.utils import parallel_to_aec
@@ -30,147 +31,15 @@ def sample_action(
     return env.action_space(agent).sample()
 
 if __name__ == "__main__":
-    # temp = Box(low=-1, high=1, shape=(2, ))
-    
-    # print(temp.sample())
-    
-    # ListA = [1, 3, 4, 2, 7, 6, 5, 5, 11, 14]
-    # result = [(x ** 2 if x % 2 != 0 else x // 2) for x in ListA]
-    # print(result)
-    
-    # ListA = [1, 3, 4, 2, 7, 6, 5, 5, 11, 14, 16]
-    # new_list = [(x**2 if x % 3 == 0 else x//2 if x % 4 == 0 else x) for x in ListA]
-    # print(new_list)
-    possible_agents = ["truck", 
-                        "carried_uav_1_1", "carried_uav_1_2", 
-                        "carried_uav_2_1", "carried_uav_2_2", 
-                        "carried_uav_2_3", "carried_uav_2_4", 
-                        "returning_uav_1_1", "returning_uav_1_2", 
-                        "returning_uav_2_1", "returning_uav_2_2", 
-                        "returning_uav_2_3", "returning_uav_2_4", 
-                        ]
-    # action_spaces = {
-    # agent: (
-    #         Discrete(17) if match("truck", agent) 
-    #         else Discrete(4) if match("carried", agent)
-    #         else Box(low=0, high=np.pi, shape=(1, ))
-    #     ) 
-    #     for agent in possible_agents
-    # }   
-    # observation_spaces = {
-    #     agent: (
-    #         MultiDiscrete(np.full([12, 2], 1500)) if match("truck", agent) 
-    #         else MultiDiscrete([15_000, 15_000] * (1 + 1 + 1 + 6))
-    #     ) 
-    #     for agent in possible_agents
-    # }
-    # print(action_spaces)
-    # print(observation_spaces["truck"].sample()[0])
-    
-    # for i in range(len(possible_agents)):
-    #     print(possible_agents[i]) 
-    
-    # warehouse_position = np.array([50, 50])
-    # truck_position = copy(warehouse_position)
-    # uav_position = np.array([np.random.randint(10, 20, 2) for _ in range(5)])
-    # observations = {
-    #     possible_agents[i]: (
-    #         np.concatenate([[warehouse_position, truck_position], uav_position]) if i == 0
-    #         else [warehouse_position, truck_position, uav_position[(i-1)%5]]
-    #     ) 
-    #     for i in range(len(possible_agents))
-    # }
-    
-    # print(observations)
-    
-    # infos = {
-    # a: {"status": "dead"} if match("returning_uav", a)
-    #     else {"status": "alive"}
-    # for a in possible_agents
-    # }
-    # print(infos)
-    
-    # action_mask_a = None
-    # action_mask_b = None
-    # action_mask = None
-    
-    # action_mask = np.ones(8)
-    # action_mask_a = action_mask[:4]
-    # action_mask_b = action_mask[4:]
-    # action_masks = {
-    #     "a" : action_mask_a, 
-    #     "b" : action_mask_b
-    # }
 
-    # print(action_mask_a)
-    # print(action_mask_b)
-    # print(action_mask)
-    # print(action_masks)
     
-    # action_mask_a[1] = 10
-    # action_mask_b[2] = 20
-    
-    # print(action_mask)
-    # print(action_masks)
-    
-    # action_mask[7] = 40
-    # print(action_mask_b)
-    # print(action_masks)
-    
-    # action_masks = np.arange(1 + 20)
-    # customer_both_masks = action_masks[1 : 1 + 10]
-    # customer_truck_masks = action_masks[1 + 10 : 1 + 14]
-    # customer_uav_masks = action_masks[1 + 14 : 1 + 20]
-    
-    # print(action_masks)
-    # print(customer_both_masks)
-    # print(customer_truck_masks)
-    # print(customer_uav_masks)
-    # print(action_masks[1 : 1 + 14])
-    # print(np.concatenate((action_masks[1 : 1 + 10], action_masks[1 + 14 : 1 + 20])))
-    
-    # print(MAX_INT)
-    # print(2**20)
-    
-    # print(np.full(2, MAX_INT))
-    
-    # name = "uav_0_2"
-    # numbers = findall(r'\d+', name)
-    # print(numbers)
-    # numbers = [int(num) for num in numbers]
-    # print(numbers)
-    
-    # print(np.cos(2*np.pi))
-
-    # infos = {
-    #     a: {
-    #         "IsAlive": False, 
-    #         "IsReady": False
-    #         } if match("returning_uav", a)
-    #         else {
-    #             "IsAlive": True, 
-    #             "IsReady": True
-    #         }
-    #     for a in possible_agents
-    #     }
-    
-    # print(infos)
-    
-    # print("carried_uav".replace("returning", "carried"))
-    
-    env = DeliveryEnvironment(render_mode="human")
+    # env = DeliveryEnvironment(render_mode="human")
+    env = DeliveryEnvironmentWithObstacle(render_mode="human")
     
     # env.reset()
     
-    # print(random.randint(5, 5))
-    
     # parallel_api_test(env, num_cycles=1_000)
     
-    # log_path = os.path.join("training", "logs")
-    
-    # f = open("src/env/log.txt", "w")
-    # f.write('Hello, world!')
-    # f.close()
     observations, infos = env.reset()
     # print(env.uav_battery_remaining)
     env.render()
@@ -234,10 +103,3 @@ if __name__ == "__main__":
     # print(f"Finished training on {str(env.unwrapped.metadata['name'])}.")
 
     # env.close()
-
-
-# env = DeliveryEnvironment()
-
-# env.reset()
-
-# env.render()

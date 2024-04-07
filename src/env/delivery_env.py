@@ -685,8 +685,8 @@ class DeliveryEnvironment(ParallelEnv):
         if self.render_mode == None:
             return
         
-        screen_width = 1000
-        screen_height = 1000
+        screen_width = 500
+        screen_height = 500
         grid_width = screen_width / 40
         grid_height = screen_height / 40
         scale = self.map_size / screen_width

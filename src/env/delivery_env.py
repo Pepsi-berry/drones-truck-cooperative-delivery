@@ -238,7 +238,7 @@ class DeliveryEnvironment(ParallelEnv):
             )
         
         # Initially, the target points of all agents are not determined
-        # So the uav_taeget_dist is set to inf and the truck path is set to empty
+        # So the uav_target_dist is set to inf and the truck path is set to empty
         self.uav_dist = np.full(self.num_uavs, -1)
         self.uav_target_dist = np.full(self.num_uavs, MAX_INT)
         self.uav_target_angle_cos = np.full(self.num_uavs, INVALID_ANGLE, dtype=float)
@@ -253,7 +253,7 @@ class DeliveryEnvironment(ParallelEnv):
         self.parcels_weight = np.array([self.generate_weight() for _ in range(self.num_customer_uav)])
         
         # Initially, the truck departs from the warehouse
-        # Drones travel with trucks
+        # uavs travel with trucks
         # The number of trucks is temporarily set to 1. 
         # If it is expanded to multiple trucks later
         # all the variable related to the trucks including here needs to be expanded.

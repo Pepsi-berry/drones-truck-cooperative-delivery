@@ -5,7 +5,7 @@ from copy import copy
 from re import match, findall
 
 import numpy as np
-from gymnasium.spaces import Box, Discrete, MultiDiscrete
+from gymnasium.spaces import Box, Discrete, MultiDiscrete, Dict, MultiBinary
 
 from pettingzoo import ParallelEnv
 import pygame
@@ -14,12 +14,16 @@ MAX_INT = 2**20
 INVALID_ANGLE = 10
 # When the distance between the returning uav and the truck is less than this threshold, 
 # the return is considered complete.
-DIST_THRESHOLD = 100
+DIST_THRESHOLD = 40
+DIST_RESTRICT_UAV = 20
+DIST_RESTRICT_OBSTACLE = 75
 # rewards in various situations
 REWARD_DELIVERY = 20
 REWARD_VICTORY = 100
 REWARD_UAV_WRECK = -200
-REWARD_UAV_RETURNING = 1
+REWARD_UAV_VIOLATE = -100
+REWARD_UAV_ARRIVAL = 1
+REWARD_URGENCY = -0.1
 # color used when rendering no-fly zones and obstacles
 COLOR_RESTRICTION = (255, 122, 122)
 COLOR_OBSTACLE = (254, 195, 106)
@@ -30,8 +34,6 @@ COLOR_OBSTACLE = (254, 195, 106)
 # In once decision, there may be more than one uav selected the same customer as the target point
 # special treatment of this needs to be refined(maybe AEV is more suitable? :(
 
-# The unimplemented parts in the scenario modeling are listed here:
-# *the range model of uavs is to be continue...*
 class DeliveryEnvironmentWithObstacle(ParallelEnv):
     """The metadata holds environment constants.
     
@@ -62,14 +64,11 @@ class DeliveryEnvironmentWithObstacle(ParallelEnv):
         self.step_len = 10
         self.time_step = None
         
-        ###########################################################################################
         self.possible_agents = ["truck", 
-                                "carried_uav_0_0", "carried_uav_0_1", 
-                                "carried_uav_1_0", "carried_uav_1_1", 
-                                "carried_uav_1_2", "carried_uav_1_3", 
-                                "returning_uav_0_0", "returning_uav_0_1", 
-                                "returning_uav_1_0", "returning_uav_1_1", 
-                                "returning_uav_1_2", "returning_uav_1_3", 
+                                # "upper_solver"
+                                "uav_0_0", "uav_0_1", 
+                                "uav_1_0", "uav_1_1", 
+                                "uav_1_2", "uav_1_3", 
                                 ]
         # uav parameters
         # unit here is m/s
@@ -80,6 +79,7 @@ class DeliveryEnvironmentWithObstacle(ParallelEnv):
         # unit here is m
         # self.uav_range = 15_000, 20_000
         self.uav_range = np.array([10_000, 15_000])
+        self.uav_obs_range = 151
         
         self.num_truck = 1
         self.num_uavs = 6
@@ -104,17 +104,17 @@ class DeliveryEnvironmentWithObstacle(ParallelEnv):
         self.num_uav_obstacle = 20
         self.num_no_fly_zone = 8
         
+        self.uav_name_mapping = dict(zip([agent for agent in self.possible_agents if match("uav", agent)],
+                                         list(range(self.num_uavs))))
+        
         # The action space of the truck is, choosing a meaningful target point to go to
         # that is warehouse point or customer points which truck can delivery
-        # The action space of the carried uav is similar to truck
-        # action_space_uav_carried[num_customer_uav + 1] is set to empty action
-        # the action space of the returning uav is chasing the truck in any direction
-        ###########################################################################################
+        # the action space of the uav is moving in any direction and the moving speed
         self.action_spaces = {
             agent: (
                 Discrete(self.num_customer_truck + 1) if match("truck", agent) 
-                else Discrete(self.num_customer_uav + 1) if match("carried", agent)
-                else Box(low=0, high=2*np.pi, shape=(1, ))
+                else Box(low=np.array([0, 0]), high=np.array([2*np.pi, self.uav_velocity[self.get_uav_info(agent)[0]]]), 
+                         shape=(2, ), dtype=np.float32)
             ) 
             for agent in self.possible_agents
         }
@@ -127,19 +127,17 @@ class DeliveryEnvironmentWithObstacle(ParallelEnv):
         self.uav_position = None
         self.uav_battery_remaining = None
         # variables used to help representing the movements of the agent in step()
-        ###########################################################################################
-        self.uav_dist = None
-        self.uav_target_dist = None
-        self.uav_target_angle_sin = None
-        self.uav_target_angle_cos = None
+        self.uav_target_positions = None
+        self.truck_target_position = None
+        # self.uav_dist = None
+        # self.uav_target_dist = None
+        # self.uav_target_angle_sin = None
+        # self.uav_target_angle_cos = None
         self.truck_path = None
 
         # The following three *_mask will be assigned as slices of action_mask. 
         # The slicing operation will return the view of the original data, 
         # so that the modification of *_mask will have an impact on the original data.
-        # self.customer_both_masks = None
-        # self.customer_truck_masks = None
-        # self.customer_uav_masks = None
         self.truck_masks = None
         self.uav_masks = None
         
@@ -157,6 +155,10 @@ class DeliveryEnvironmentWithObstacle(ParallelEnv):
         ###########################################################################################
         self.uav0_load_masks = None
         self.uav1_load_masks = None
+        # Indicates the current stage of uavs
+        # IMPORTANT
+        # -1 means not launched, 0 means returning, 1 means delivery
+        self.uav_stages = None
         
         self.warehouse_position = None
         self.customer_position_truck = None
@@ -173,15 +175,32 @@ class DeliveryEnvironmentWithObstacle(ParallelEnv):
         self.no_fly_zones = None
         self.uav_obstacles = None
         
-        # 15_001 here is the size of city map by m, should be parameterized later...
         # 1(warehouse) + 1(truck itself)
         ###########################################################################################
-        # 1(warehouse) + 1(truck) + 1(uav itself)
+        # 1(uav info: no. and velocity) + 1(dist_uav and dist_obstacle)
+        # 1(moving target(current)) + 1(moving target(destination))
+        # uav_obs_space = np.row_stack([[self.num_uavs, np.max(self.uav_velocity) + 1], 
+        #                               [DIST_RESTRICT_UAV + 1, DIST_RESTRICT_OBSTACLE + 1], 
+        #                               np.full([(1 + 1 + self.num_uavs + self.num_uav_obstacle + self.num_no_fly_zone * 2), 2], 
+        #                                       self.map_size + 1)])
         self.observation_spaces = {
             agent: (
-                MultiDiscrete(np.full([(1 + 1 + self.num_uavs + self.num_customer_truck), 2], self.map_size + 1)) if match("truck", agent) 
-                else MultiDiscrete(np.full([(1 + 1 + 1 + self.num_customer_uav), 2], self.map_size + 1))
-            ) 
+                Dict(
+                    {
+                        "pos_obs": MultiDiscrete(np.full([(1 + 1 + self.num_uavs + self.num_parcels), 2], self.map_size + 1)), 
+                        "truck_action_masks": MultiBinary(self.num_parcels), 
+                        "uav_action_masks" : MultiBinary([2, self.num_customer_uav]) # 2: uav_0 and uav_1
+                    }
+                ) if match("truck", agent)
+                else Dict(
+                    {
+                        # 2 means no-fly zones, obstacles & uavs.
+                        "surroundings": MultiBinary([2, self.uav_obs_range, self.uav_obs_range]), 
+                        # 3 means uav, target, target of target
+                        "coordi_info": MultiDiscrete(np.full([3, 2], self.map_size + 1))
+                    }
+                )
+            )
             for agent in self.possible_agents
         }
     
@@ -198,6 +217,13 @@ class DeliveryEnvironmentWithObstacle(ParallelEnv):
     @functools.lru_cache(maxsize=None)
     def action_space(self, agent):
         return self.action_spaces[agent]
+    
+    def get_uav_info(self, uav):
+        # get the uav info: kind and no.
+        uav_info = findall(r'\d+', uav)
+        uav_info = [int(num) for num in uav_info]
+        uav_no = uav_info[0] * self.num_uavs_0 + uav_info[1]
+        return uav_info + [uav_no]
 
     def generate_weight(self):
         probability = random.random()  # generate a random number between [0, 1)
@@ -211,13 +237,15 @@ class DeliveryEnvironmentWithObstacle(ParallelEnv):
             # 0.1：>= 10kg
             return random.uniform(10.1, 50)
 
-    # It is necessary to ensure that the no-fly zone does not contain any customer points 
-    # that only support delivery by uav.
+    # It is necessary to ensure that the no-fly zone does not contain warehouse and 
+    # any customer points that only support delivery by uav.
     # The size of the no-fly zone would better not exceed 3 grids in both the x-axis and y-axis directions.
     # The no-fly zone should probably be distributed a little bit closer to the center of the map
     # In the subsequent update of the environment, 
     # Gaussian distribution may be used instead of uniform sampling.
     def generate_no_fly_zone(self):
+        # testing use
+        # return np.array([self.warehouse_position - np.array([self.grid_edge, self.grid_edge]), np.array([self.grid_edge * 2, self.grid_edge])])
         while True:
             not_suitable = False
             upper_left_corner = np.array([random.randint(self.grid_edge, self.map_size - 4 * self.grid_edge),
@@ -228,6 +256,8 @@ class DeliveryEnvironmentWithObstacle(ParallelEnv):
             for customer in self.customer_position_uav:
                 if customer[0] > upper_left_corner[0] and customer[0] < lower_right_corner[0] and customer[1] > upper_left_corner[1] and customer[1] < lower_right_corner[1]:
                     not_suitable = True
+            if self.warehouse_position[0] > upper_left_corner[0] and self.warehouse_position[0] < lower_right_corner[0] and self.warehouse_position[1] > upper_left_corner[1] and self.warehouse_position[1] < lower_right_corner[1]:
+                not_suitable = True
             if not_suitable:
                 continue
             return np.array([upper_left_corner, range_size])
@@ -235,13 +265,108 @@ class DeliveryEnvironmentWithObstacle(ParallelEnv):
     
     # Obstacles need to be situated inside the road grid and preferably should not intersect with the road
     def generate_uav_obstacle(self, grid_num):
-        center = np.array([random.randint(grid_num / 5, grid_num * 0.8) * self.grid_edge + random.randint(self.grid_edge * 0.3, self.grid_edge * 0.7), 
-                          random.randint(grid_num / 5, grid_num * 0.8) * self.grid_edge + random.randint(self.grid_edge * 0.3, self.grid_edge * 0.7)])
-        radius = random.randint(self.grid_edge * 0.2, self.grid_edge * 0.3)
-        return {
-            "center" : center, 
-            "radius" : radius
-        }
+        # center = np.array([random.randint(grid_num / 5, grid_num * 0.8) * self.grid_edge + random.randint(self.grid_edge * 0.3, self.grid_edge * 0.7), 
+        #                   random.randint(grid_num / 5, grid_num * 0.8) * self.grid_edge + random.randint(self.grid_edge * 0.3, self.grid_edge * 0.7)])
+        # radius = random.randint(self.grid_edge * 0.2, self.grid_edge * 0.3)
+        # return {
+        #     "center" : center, 
+        #     "radius" : radius
+        # }
+        upper_left_corner = np.array([random.randint(grid_num / 5, grid_num * 0.8) * self.grid_edge + random.randint(self.grid_edge * 0.2, self.grid_edge * 0.4), 
+                          random.randint(grid_num / 5, grid_num * 0.8) * self.grid_edge + random.randint(self.grid_edge * 0.2, self.grid_edge * 0.4)])
+        obstacle_size = random.randint(self.grid_edge * 0.3, self.grid_edge * 0.5)
+        
+        return np.array([upper_left_corner, [obstacle_size, obstacle_size]])
+        
+    def zones_intersection(self, zone, xlo , xhi, ylo, yhi):
+        lower_left = zone[0]
+        upper_right = zone[0] + zone[1]
+        if xlo > upper_right[0] or xhi < lower_left[0] or ylo > upper_right[1] or yhi < lower_left[1]:
+            return None
+        else:
+            return np.array([
+                max(xlo, lower_left[0]), 
+                min(xhi, upper_right[0]) + 1, 
+                max(ylo, lower_left[1]), 
+                min(yhi, upper_right[1]) + 1])
+            
+    def zones_intersection_fast_check(self, lower_left, upper_right, xlo, xhi, ylo, yhi):
+        return not (xlo > upper_right[0] or xhi < lower_left[0] or ylo > upper_right[1] or yhi < lower_left[1])
+                
+    def uav_tjc_zone_intersect(self, zone, src_pos, dst_pos):
+        lower_left = zone[0]
+        upper_right = zone[0] + zone[1]
+        # check if one of the end of tjc inside the rect zone
+        if (src_pos[0] > lower_left[0] and src_pos[0] < upper_right[0] and src_pos[1] > lower_left[1] and src_pos[1] < upper_right[1]) or (dst_pos[0] > lower_left[0] and dst_pos[0] < upper_right[0] and dst_pos[1] > lower_left[1] and dst_pos[1] < upper_right[1]):
+            return True
+        
+        # check if the tjc intersect with one of the diagonal
+        # fast check
+        tjc_xlo, tjc_xhi, tjc_ylo, tjc_yhi = (
+            min(src_pos[0], dst_pos[0]), 
+            max(src_pos[0], dst_pos[0]), 
+            min(src_pos[1], dst_pos[1]), 
+            max(src_pos[1], dst_pos[1])
+        )
+        if not self.zones_intersection_fast_check(lower_left, upper_right, tjc_xlo, tjc_xhi, tjc_ylo, tjc_yhi):
+            return False
+        # cross product check
+        lower_right = np.array([upper_right[0], lower_left[1]])
+        upper_left = np.array([lower_left[0], upper_right[1]])
+        # ignore the case of cross * cross == 0, 
+        # which may means that the line segments are on the same line
+        # but not happened here, just mention :)
+        if (
+            cross_product_2d_array(dst_pos - src_pos, lower_left - src_pos) * cross_product_2d_array(dst_pos - src_pos, upper_right - src_pos) < 0 
+            and 
+            cross_product_2d_array(upper_right - lower_left, src_pos - lower_left) * cross_product_2d_array(upper_right - lower_left, dst_pos - lower_left) < 0
+            ):
+            return True
+        if (cross_product_2d_array(dst_pos - src_pos, lower_right - src_pos) * cross_product_2d_array(dst_pos - src_pos, upper_left - src_pos) < 0
+            and 
+            cross_product_2d_array(lower_right - upper_left, src_pos - upper_left) * cross_product_2d_array(lower_right - upper_left, dst_pos - upper_left) < 0
+            ):
+            return True
+        
+        return False
+    
+    # to be tested...
+    def get_obs_by_uav(self, uav):
+        uav_position = self.uav_position[self.uav_name_mapping[uav]]
+        uav_obs = np.zeros([2, self.uav_obs_range, self.uav_obs_range], dtype=np.int64)
+        uav_obs[0] = 1
+        obs_radius = self.uav_obs_range / 2
+        x_offset = uav_position[0] - obs_radius
+        y_offset = uav_position[1] - obs_radius
+        
+        xlo , xhi, ylo, yhi = (
+            max(uav_position[0] - obs_radius, 0), 
+            min(uav_position[0] + obs_radius, self.map_size), 
+            max(uav_position[1] - obs_radius, 0), 
+            min(uav_position[1] + obs_radius, self.map_size)
+        )
+        # no-fly zones obs
+        uav_obs[0][int(xlo - x_offset) : int(xhi - x_offset) + 1][int(ylo - y_offset) : int(yhi - y_offset) + 1] = 0
+        
+        for nfz in self.no_fly_zones:
+            intersection = self.zones_intersection(nfz, xlo, xhi, ylo, yhi)
+            if intersection is None:
+                continue
+            uav_obs[0][int(intersection[0] - x_offset) : int(intersection[1] - x_offset)][int(intersection[2] - y_offset) : int(intersection[3] - y_offset)] = 1
+        
+        # obstacles obs
+        for obstacle in self.uav_obstacles:
+            intersection = self.zones_intersection(obstacle, xlo, xhi, ylo, yhi)
+            if intersection is None:
+                continue
+            uav_obs[1][int(intersection[0] - x_offset) : int(intersection[1] - x_offset)][int(intersection[2] - y_offset) : int(intersection[3] - y_offset)] = 1
+        
+        # uav obs
+        for uav in self.uav_position:
+            if uav[0] < xhi and uav[0] > xlo and uav[1] < yhi and uav[1] > ylo:
+                uav_obs[1][int(uav[0] - x_offset)][int(uav[1] - y_offset)] = 1
+                
+        return uav_obs
     
     def reset(self, seed=None, options=None):
         """Reset set the environment to a starting point.
@@ -261,10 +386,11 @@ class DeliveryEnvironmentWithObstacle(ParallelEnv):
         self.time_step = 0
         # Initially, all UAVs are in state of loaded in truck
         self.agents = ["truck", 
-                       "carried_uav_0_0", "carried_uav_0_1", 
-                       "carried_uav_1_0", "carried_uav_1_1", 
-                       "carried_uav_1_2", "carried_uav_1_3", 
+                       "uav_0_0", "uav_0_1", 
+                       "uav_1_0", "uav_1_1", 
+                       "uav_1_2", "uav_1_3", 
                        ]
+        self.uav_stages = np.ones(self.num_uavs) * (-1)
         # The warehouse is located in the center of the map
         self.warehouse_position = np.array([self.map_size / 2, self.map_size / 2])
         # All customer points are distributed at the edge of the road grid
@@ -289,11 +415,9 @@ class DeliveryEnvironmentWithObstacle(ParallelEnv):
         self.uav_obstacles = [self.generate_uav_obstacle(grid_num) for _ in range(self.num_uav_obstacle)]
         
         # Initially, the target points of all agents are not determined
-        # So the uav_taeget_dist is set to inf and the truck path is set to empty
-        self.uav_dist = np.full(self.num_uavs, -1)
-        self.uav_target_dist = np.full(self.num_uavs, MAX_INT)
-        self.uav_target_angle_cos = np.full(self.num_uavs, INVALID_ANGLE, dtype=float)
-        self.uav_target_angle_sin = np.full(self.num_uavs, INVALID_ANGLE, dtype=float)
+        # So the truck path is set to empty
+        self.uav_target_positions = np.ones([self.num_uavs, 2]) * (-1)
+        self.truck_target_position = np.ones(2) * -1
         self.truck_path = []
         
         # parcel weights probability distribution: 
@@ -304,7 +428,7 @@ class DeliveryEnvironmentWithObstacle(ParallelEnv):
         self.parcels_weight = np.array([self.generate_weight() for _ in range(self.num_customer_uav)])
         
         # Initially, the truck departs from the warehouse
-        # Drones travel with trucks
+        # uavs travel with trucks
         # The number of trucks is temporarily set to 1. 
         # If it is expanded to multiple trucks later
         # all the variable related to the trucks including here needs to be expanded.
@@ -312,13 +436,13 @@ class DeliveryEnvironmentWithObstacle(ParallelEnv):
         self.uav_position = np.array([copy(self.truck_position) for _ in range(self.num_uavs)])
         # Set the initial power of the uav to the full charge
         self.uav_battery_remaining = np.zeros(self.num_uavs)
+        # closer to elegent
         for agent in self.agents:
-            if not match("truck", agent):
-                uav_info = findall(r'\d+', agent)
-                uav_info = [int(num) for num in uav_info]
-                uav_no = uav_info[0] * self.num_uavs_0 + uav_info[1]
-                self.uav_battery_remaining[uav_no] = self.uav_range[uav_info[0]]
+            if match("uav", agent):
+                uav_info = self.get_uav_info(agent)
+                self.uav_battery_remaining[uav_info[2]] = self.uav_range[uav_info[0]]
         
+        # print(self.uav_battery_remaining)
         
         # Distribution of action space in action_masks: 
         # to warehouse —— to customer_truck —— to customer_both —— to customer_uav —— uav do nothing
@@ -339,58 +463,88 @@ class DeliveryEnvironmentWithObstacle(ParallelEnv):
         uav_0_masks = self.uav0_load_masks * self.uav_masks
         uav_1_masks = self.uav1_load_masks * self.uav_masks
 
-        current_action_masks = {
-            agent: (self.truck_masks if match("truck", agent)
-                    else uav_0_masks if match("carried_uav_0", agent)
-                    else uav_1_masks if match("carried_uav_1", agent)
-                    else None)
-            for agent in self.possible_agents
-        }
+        # current_action_masks = {
+        #     agent: (self.truck_masks if match("truck", agent)
+        #             else uav_0_masks if match("uav_0", agent)
+        #             else uav_1_masks if match("uav_1", agent)
+        #             else None)
+        #     for agent in self.possible_agents
+        # }
+        
         observations = {
-            self.possible_agents[i]: {
+            agent: {
                 "observation": (
-                np.row_stack([[self.warehouse_position, self.truck_position], self.uav_position, 
-                                 self.customer_position_both, self.customer_position_truck]) if i < self.num_truck 
-                else np.row_stack([[self.warehouse_position, self.truck_position, 
-                                    self.uav_position[(i - self.num_truck) % self.num_uavs]], 
-                                   self.customer_position_both, self.customer_position_uav])), 
-                "action_mask": current_action_masks[self.possible_agents[i]]
-                }
-            for i in range(len(self.possible_agents))
+                    dict({
+                        "pos_obs" : np.row_stack([[self.warehouse_position, self.truck_position], self.uav_position, 
+                                           self.customer_position_truck, self.customer_position_both, self.customer_position_uav]), 
+                        "truck_action_masks" : self.action_masks[1 : -1], 
+                        "uav_action_masks" : np.row_stack([uav_0_masks[ : -1], uav_1_masks[ : -1]])
+                    }) if match("truck", agent)
+                    # else np.row_stack([self.truck_position, self.truck_position, 
+                    #                    np.array([[self.get_uav_info(agent)[2], self.uav_velocity[self.get_uav_info(agent)[0]]], 
+                    #                              [DIST_RESTRICT_UAV, DIST_RESTRICT_OBSTACLE]]), 
+                    #                    self.uav_position, np.array([obstacle[0] for obstacle in self.uav_obstacles]), 
+                    #                    self.no_fly_zones[:, 0], self.no_fly_zones[:, 1]])
+                    else dict({
+                        "surroundings" : self.get_obs_by_uav(agent), 
+                        "coordi_info" : np.row_stack([self.uav_position[self.uav_name_mapping[agent]], 
+                                                      self.truck_position, self.truck_position])
+                    })
+                ), 
+                # "action_mask": current_action_masks[agent]
+            }
+            for agent in self.agents
         }
-
+        
         # # Get dummy infos. Necessary for proper parallel_to_aec conversion
         
-        # True means alive while False means dead
-        # "alive" means that the agent is taking action
-        # "ready" means that decision-making is needed.
+        # infos contain if agent is available for TA
+        # if there is at least one agent(or truck?) available, then run the upper solver
         self.infos = {
-            a: {
-                "IsAlive": False, 
-                "IsReady": False
-                } if match("returning_uav", a)
-                else {
-                    "IsAlive": True, 
-                    "IsReady": True
-                }
+            a: True
+                # {
+                #     "IsAlive": True, 
+                #     "IsReady": True
+                # }
             for a in self.possible_agents
             }
 
         return observations, self.infos
     
+    # input: the actions output by the upper layer solution 
+    # complete the task assignment and scheduling of the agents in the environment.
+    # mask(customer) infos, target infos need to be added
+    def TA_Scheduling(self, actions):
+        for agent in actions:
+            action = actions[agent]
+            if match("truck", agent):
+                self.infos[agent] = False
+                if action == 0:
+                    self.truck_target_position = copy(self.warehouse_position)
+                elif 0 < action <= self.num_parcels_truck:
+                    self.truck_target_position = copy(self.customer_position_truck[action - 1])
+                    self.truck_masks[action] = 0
+                elif self.num_parcels_truck < action <= self.num_customer_truck:
+                    self.truck_target_position = copy(self.customer_position_both[action - self.num_parcels_truck - 1])
+                    self.truck_masks[action] = 0
+                else:
+                    self.truck_target_position = copy(self.customer_position_uav[action - self.num_customer_truck - 1])
+            elif match("uav", agent):
+                uav_no = self.uav_name_mapping[agent]
+                if self.uav_stages[uav_no] == -1 and action != -1:
+                    self.infos[agent] = False
+                    self.uav_masks[action] = 0
+                    self.uav_stages[uav_no] = 1
+                    if action < self.num_customer_both:
+                        self.uav_target_positions[uav_no] = self.customer_position_both[action]
+                    else:
+                        self.uav_target_positions[uav_no] = self.customer_position_uav[action - self.num_customer_both]                    
+    
+    
     # When the truck performs a new action, it first generates a refined path through genarate_truck_path(),
     # and then moves in truck_move() according to the generated path before reaching the target 
     # (that is, before generating a new action).
-    def genarate_truck_path(self, action):
-        # target point x, y coordinate
-        target = None
-        if action == 0:
-            target = self.warehouse_position
-        elif 0 < action <= self.num_parcels_truck:
-            target = self.customer_position_truck[action - 1]
-        else:
-            target = self.customer_position_both[action - self.num_customer_truck - 1]
-            
+    def genarate_truck_path(self, target):
         # get the id of the grid which truck and target located here...
         id_grid_truck_x = self.truck_position[0] / self.grid_edge
         id_grid_target_x = target[0] / self.grid_edge
@@ -488,78 +642,73 @@ class DeliveryEnvironmentWithObstacle(ParallelEnv):
             return True
         else:
             return False
-                
-    def carried_uav_move(self, uav, action):
-        # get the uav info: kind and no.
-        uav_info = findall(r'\d+', uav)
-        uav_info = [int(num) for num in uav_info]
-        uav_no = uav_info[0] * self.num_uavs_0 + uav_info[1]
-        
-        # Recovering an action in progress
-        if action is None:
-            action = self.uav_dist[uav_no]
-        
-        # get the target coordinate
-        target = None
-        if action < self.num_customer_both:
-            target = self.customer_position_both[action]
-        else:
-            target = self.customer_position_uav[action - self.num_customer_both]
-        
-        # Initialize the moving angle and target for the first execution.
-        if self.uav_target_dist[uav_no] == MAX_INT:
-            self.uav_dist[uav_no] = action
-            self.uav_target_dist[uav_no] = np.sqrt(np.sum(np.square(self.uav_position[uav_no] - target)))
-            self.uav_target_angle_cos[uav_no] = float(target[0] - self.uav_position[uav_no][0]) / self.uav_target_dist[uav_no]
-            self.uav_target_angle_sin[uav_no] = float(target[1] - self.uav_position[uav_no][1]) / self.uav_target_dist[uav_no]
-        
-        if self.uav_target_dist[uav_no] <= self.step_len * self.uav_velocity[uav_info[0]]:
-            self.uav_position[uav_no] = target
-            self.uav_battery_remaining[uav_no] -= self.uav_target_dist[uav_no]
-            return True
-        else:
-            self.uav_target_dist[uav_no] -= self.step_len * self.uav_velocity[uav_info[0]]
-            self.uav_position[uav_no][0] += int(self.uav_target_angle_cos[uav_no] * self.step_len * self.uav_velocity[uav_info[0]])
-            self.uav_position[uav_no][1] += int(self.uav_target_angle_sin[uav_no] * self.step_len * self.uav_velocity[uav_info[0]])
-            self.uav_battery_remaining[uav_no] -= self.step_len * self.uav_velocity[uav_info[0]]
-            return False
     
-    
-    def returning_uav_move(self, uav, action):
+    # obstacle judgement is to be added...
+    # update the location of uav and return the result of movement
+    def uav_move(self, uav, action):
         # get the uav info: kind and no.
-        uav_info = findall(r'\d+', uav)
-        uav_info = [int(num) for num in uav_info]
-        uav_no = uav_info[0] * self.num_uavs_0 + uav_info[1]
+        # uav_info = findall(r'\d+', uav)
+        # uav_info = [int(num) for num in uav_info]
+        # uav_no = uav_info[0] * self.num_uavs_0 + uav_info[1]
+        uav_no = self.uav_name_mapping[uav]
         
         # print(int(np.cos(action) * self.step_len * self.uav_velocity[uav_info[0]]))
-        # print(action)
-        dist = self.step_len * self.uav_velocity[uav_info[0]]
-        self.uav_position[uav_no][0] += int(np.cos(action) * dist)
-        self.uav_position[uav_no][1] += int(np.sin(action) * dist)
+        # print("uav action: ", action)
+        src_pos = copy(self.uav_position[uav_no])
+        
+        dist = self.step_len * action[1]
+        # int-ify or not?
+        self.uav_position[uav_no][0] += np.cos(action[0]) * dist
+        self.uav_position[uav_no][1] += np.sin(action[0]) * dist
+        
+        # tjc_xlo, tjc_xhi, tjc_ylo, tjc_yhi = (
+        #     min(src_pos[0], self.uav_position[uav_no][0]), 
+        #     max(src_pos[0], self.uav_position[uav_no][0]), 
+        #     min(src_pos[1], self.uav_position[uav_no][1]), 
+        #     max(src_pos[1], self.uav_position[uav_no][1])
+        # )
+        
+        for obstacle in self.uav_obstacles:
+            # if insersect or not
+            if self.uav_tjc_zone_intersect(obstacle, src_pos, self.uav_position[uav_no]):
+                self.uav_position[uav_no] = obstacle[0] + obstacle[1] / 2
+                return -2
+            
+        # check if the distance between this uav with others is less than saft distance
+        # to be modified
+        for no in range(self.num_uavs):
+            if no != uav_no and np.sqrt(np.sum(np.square(self.uav_position[uav_no] - self.uav_position[no]))) < DIST_RESTRICT_UAV:
+                return no * (-1) + (-3)
+        
+        for nfz in self.no_fly_zones:
+            if self.uav_tjc_zone_intersect(nfz, src_pos, self.uav_position[uav_no]):
+                print("!!DANGER!!", uav)
+                return -1
         
         # update the remaining battery of uav
         self.uav_battery_remaining[uav_no] -= dist
         
-        # typically, the uav will returning to the truck to get recovery and load
-        if np.sqrt(np.sum(np.square(self.uav_position[uav_no] - self.truck_position))) < DIST_THRESHOLD:
-            self.uav_position[uav_no] = copy(self.truck_position)
+        # when the distance between uav and target is less than a threshold
+        # then consider the uav as arrival 
+        if np.sqrt(np.sum(np.square(self.uav_position[uav_no] - self.uav_target_positions[uav_no]))) < DIST_THRESHOLD:
+            self.uav_position[uav_no] = copy(self.uav_target_positions[uav_no])
             return 1
         # The uav may also be returned directly to the warehouse, 
         # but note that in this case, this uav will not be activated again.
-        elif np.sqrt(np.sum(np.square(self.uav_position[uav_no] - self.warehouse_position))) < DIST_THRESHOLD:
-            self.uav_position[uav_no] = copy(self.warehouse_position)
-            return -1
+        # elif np.sqrt(np.sum(np.square(self.uav_position[uav_no] - self.warehouse_position))) < DIST_THRESHOLD:
+        #     self.uav_position[uav_no] = copy(self.warehouse_position)
+        #     return -1
         else:
             return 0
-            
-    def updata_action_mask(self, agent, action):
-        if match("truck", agent):
-            if action != 0:
-                self.truck_masks[action] = 0
-        elif match("carried", agent):
-            self.uav_masks[action] = 0
-        else:
-            pass
+        
+    def update_action_mask(self, agent, action):
+        # if match("truck", agent):
+        #     if action != 0:
+        #         self.truck_masks[action] = 0
+        # else:
+        #     self.uav_masks[action] = 0
+        pass
+
 
     def step(self, actions):
         """Takes in an action for the current agent (specified by agent_selection).
@@ -576,8 +725,11 @@ class DeliveryEnvironmentWithObstacle(ParallelEnv):
         And any internal state used by observe() or render()
         """
         rewards = {
-            "Global": -1, # get -1 reward every transitions to encourage faster delivery
+            # "Global": -1, # get -1 reward every transitions to encourage faster delivery
+            agent: REWARD_URGENCY for agent in self.agents if match("uav", agent)
+            # get -0.1 reward every transitions to encourage faster delivery
             }
+        rewards["Global"] = -1
         # Execute actions
         ####
         # processes to be performed here include. 
@@ -585,101 +737,136 @@ class DeliveryEnvironmentWithObstacle(ParallelEnv):
         # - Update action mask
         # - Update agent state (i.e. infos)
         # - Get the rewards including global rewards and returning rewards
-        for agent in actions:
-            if match("truck", agent):
-                # in the first movement, a refined path needs to be generated.
-                if not self.truck_path:
-                    self.genarate_truck_path(actions[agent])
-                    self.updata_action_mask(agent, actions[agent])
-                if self.truck_move():
-                    self.infos[agent]["IsReady"] = True
-                    # calculate reward when arriving to target
-                    if actions[agent] == 0:
-                        if np.count_nonzero(self.action_masks) == 2:
-                            rewards["Global"] += REWARD_VICTORY
-                            self.agents.remove[agent]
-                    else:
-                        rewards["Global"] += REWARD_DELIVERY
-                        
-                else:
-                    self.infos[agent]["IsReady"] = False # a little bit redundant
-        for agent in actions:
-            if match("carried", agent):
-                uav_info = findall(r'\d+', agent)
-                uav_info = [int(num) for num in uav_info]
-                uav_no = uav_info[0] * self.num_uavs_0 + uav_info[1]
-                
-                if actions[agent] != self.num_customer_uav:
-                    if self.uav_target_dist[uav_no] == MAX_INT:
-                        self.updata_action_mask(agent, actions[agent])
-                        
-                    uav_moving_result = self.carried_uav_move(agent, actions[agent])
+        
+        # truck moves
+        # in the first movement, a refined path needs to be generated.
+        if not self.truck_path:
+            self.genarate_truck_path(self.truck_target_position)
+            # self.update_action_mask(agent, self.truck_target_position)
+        if self.truck_move():
+            self.infos["truck"] = True
+            # calculate reward when arriving to target
+            if np.array_equal(self.truck_position, self.warehouse_position):
+                if np.count_nonzero(self.action_masks) == 2:
+                    rewards["Global"] += REWARD_VICTORY
+                    self.infos.pop("truck")
+                    self.agents.remove["truck"]
+            else:
+                rewards["Global"] += REWARD_DELIVERY                        
+                # else:
+                #     self.infos[agent]["IsReady"] = False # a little bit redundant
+        
+        # to be complete: 
+        # - Update uav coordinate
+        # - Update uav state (i.e. infos)
+        # - Get the rewards including global rewards and returning rewards    
+        for agent in actions: 
+            if match("uav", agent): # stage == -1 means unlaunched
+                uav_no = self.uav_name_mapping[agent]
+                if self.uav_stages[self.uav_name_mapping[agent]] != -1:
+                    uav_moving_result = self.uav_move(agent, actions[agent])
+                    
                     if self.uav_battery_remaining[uav_no] <= 0:
-                        # that means uav wrecked
+                        # that means uav's battery died and uav wrecked
+                        self.agents.remove(agent)
+                        self.infos.pop(agent)
                         rewards["Global"] += REWARD_UAV_WRECK
-                        self.infos[agent]["IsAlive"] = False
-                        self.infos[agent]["IsReady"] = False
+                    if uav_moving_result == 1:
+                        self.uav_stages[uav_no] -= 1
+                        if self.uav_stages[uav_no] == -1:
+                            self.infos[agent] = True
+                        # else:
+                        #     self.uav_target_positions[uav_no] = self.truck_position
+                        rewards[agent] += REWARD_UAV_ARRIVAL
+                    elif uav_moving_result == -1:
+                        rewards[agent] += REWARD_UAV_VIOLATE
+                    elif uav_moving_result == -2:
                         self.agents.remove(agent)
-                    elif uav_moving_result:
-                        self.infos[agent]["IsAlive"] = False
-                        self.infos[agent]["IsReady"] = False
-                        self.infos[agent.replace("carried", "returning")]["IsAlive"] = True
-                        self.infos[agent.replace("carried", "returning")]["IsReady"] = True
-                        self.agents.remove(agent)
-                        self.agents.append(agent.replace("carried", "returning"))
-                        # calculate reward when arriving to customer
-                        rewards["Global"] += REWARD_DELIVERY
-                    else:
-                        # can move upwards to execute with update_action_mask
-                        self.infos[agent]["IsReady"] = False 
-                # When uav doesn't launching, synchronize the coordinates of uav to truck.
+                        self.infos.pop(agent)
+                        rewards[agent] += REWARD_UAV_WRECK
+                    else: # uav-and-uav collision case, to be complete...
+                        pass
+                    
                 else:
                     self.uav_position[uav_no] = copy(self.truck_position)
-                    self.infos[agent]["IsReady"] = True # redundant?
-            elif match("returning", agent):
-                returning_result = self.returning_uav_move(agent, actions[agent])
+        
+        # for agent in actions:
+        #     if match("carried", agent):
+        #         uav_info = findall(r'\d+', agent)
+        #         uav_info = [int(num) for num in uav_info]
+        #         uav_no = uav_info[0] * self.num_uavs_0 + uav_info[1]
                 
-                uav_info = findall(r'\d+', agent)
-                uav_info = [int(num) for num in uav_info]
-                uav_no = uav_info[0] * self.num_uavs_0 + uav_info[1]
-                if self.uav_battery_remaining[uav_no] <= 0:
-                    # that means uav wrecked
-                    rewards["Global"] += REWARD_UAV_WRECK
-                    self.infos[agent]["IsAlive"] = False
-                    self.infos[agent]["IsReady"] = False
-                    self.agents.remove(agent)
+        #         if actions[agent] != self.num_customer_uav:
+        #             if self.uav_target_dist[uav_no] == MAX_INT:
+        #                 self.update_action_mask(agent, actions[agent])
+                        
+        #             uav_moving_result = self.carried_uav_move(agent, actions[agent])
+        #             if self.uav_battery_remaining[uav_no] <= 0:
+        #                 # that means uav wrecked
+        #                 rewards["Global"] += REWARD_UAV_WRECK
+        #                 self.infos[agent]["IsAlive"] = False
+        #                 self.infos[agent]["IsReady"] = False
+        #                 self.agents.remove(agent)
+        #             elif uav_moving_result:
+        #                 self.infos[agent]["IsAlive"] = False
+        #                 self.infos[agent]["IsReady"] = False
+        #                 self.infos[agent.replace("carried", "returning")]["IsAlive"] = True
+        #                 self.infos[agent.replace("carried", "returning")]["IsReady"] = True
+        #                 self.agents.remove(agent)
+        #                 self.agents.append(agent.replace("carried", "returning"))
+        #                 # calculate reward when arriving to customer
+        #                 rewards["Global"] += REWARD_DELIVERY
+        #             else:
+        #                 # can move upwards to execute with update_action_mask
+        #                 self.infos[agent]["IsReady"] = False 
+        #         # When uav doesn't launching, synchronize the coordinates of uav to truck.
+        #         else:
+        #             self.uav_position[uav_no] = copy(self.truck_position)
+        #             self.infos[agent]["IsReady"] = True # redundant?
+        #     elif match("returning", agent):
+        #         returning_result = self.returning_uav_move(agent, actions[agent])
                 
-                elif returning_result == 1:
-                    self.infos[agent]["IsAlive"] = False
-                    self.infos[agent]["IsReady"] = False
-                    self.infos[agent.replace("returning", "carried")]["IsAlive"] = True
-                    self.infos[agent.replace("returning", "carried")]["IsReady"] = True
-                    self.agents.remove(agent)
-                    self.agents.append(agent.replace("returning", "carried"))
-                    self.uav_battery_remaining[uav_no] = self.uav_range[uav_info[0]]
-                    # calculate reward when arriving to customer
-                    rewards[agent] = 1
-                # when the uav return to warehouse directly, 
-                # it won't be re-activated as carried_uav
-                elif returning_result == -1:
-                    self.infos[agent]["IsAlive"] = False
-                    self.infos[agent]["IsReady"] = False
-                    self.agents.remove(agent)
-                    rewards[agent] = 1
-                else:
-                    self.infos[agent]["IsReady"] = True # redundant?
+        #         uav_info = findall(r'\d+', agent)
+        #         uav_info = [int(num) for num in uav_info]
+        #         uav_no = uav_info[0] * self.num_uavs_0 + uav_info[1]
+        #         if self.uav_battery_remaining[uav_no] <= 0:
+        #             # that means uav wrecked
+        #             rewards["Global"] += REWARD_UAV_WRECK
+        #             self.infos[agent]["IsAlive"] = False
+        #             self.infos[agent]["IsReady"] = False
+        #             self.agents.remove(agent)
+                
+        #         elif returning_result == 1:
+        #             self.infos[agent]["IsAlive"] = False
+        #             self.infos[agent]["IsReady"] = False
+        #             self.infos[agent.replace("returning", "carried")]["IsAlive"] = True
+        #             self.infos[agent.replace("returning", "carried")]["IsReady"] = True
+        #             self.agents.remove(agent)
+        #             self.agents.append(agent.replace("returning", "carried"))
+        #             self.uav_battery_remaining[uav_no] = self.uav_range[uav_info[0]]
+        #             # calculate reward when arriving to customer
+        #             rewards[agent] = 1
+        #         # when the uav return to warehouse directly, 
+        #         # it won't be re-activated as carried_uav
+        #         elif returning_result == -1:
+        #             self.infos[agent]["IsAlive"] = False
+        #             self.infos[agent]["IsReady"] = False
+        #             self.agents.remove(agent)
+        #             rewards[agent] = 1
+        #         else:
+        #             self.infos[agent]["IsReady"] = True # redundant?
 
 
         # Check termination conditions
         ####
         terminations = {a: False for a in self.agents}
-        if not self.agents:
+        if np.sum(self.uav_stages) == (-1) * self.num_uavs and np.array_equal(self.truck_position, self.warehouse_position) and np.count_nonzero(self.action_masks) == 2:
             terminations = {a: True for a in self.agents}
 
         # Check truncation conditions (overwrites termination conditions)
         ####
         truncations = {a: False for a in self.agents}
-        if self.time_step > self.MAX_STEP:
+        if self.time_step >= self.MAX_STEP:
             truncations = {a: True for a in self.agents}
             self.agents = []
         self.time_step += 1
@@ -689,26 +876,47 @@ class DeliveryEnvironmentWithObstacle(ParallelEnv):
         uav_0_masks = self.uav0_load_masks * self.uav_masks
         uav_1_masks = self.uav1_load_masks * self.uav_masks
 
-        current_action_masks = {
-            agent: (self.truck_masks if match("truck", agent)
-                    else uav_0_masks if match("carried_uav_0", agent)
-                    else uav_1_masks if match("carried_uav_1", agent)
-                    else None)
-            for agent in self.possible_agents
+        # current_action_masks = {
+        #     agent: (self.truck_masks if match("truck", agent)
+        #             else uav_0_masks if match("uav_0", agent)
+        #             else uav_1_masks if match("uav_1", agent)
+        #             else None)
+        #     for agent in self.agents
+        # }
+        
+        coordi = {
+            agent: np.row_stack(
+                [self.uav_position[self.uav_name_mapping[agent]], 
+                 (
+                     self.uav_target_positions[self.uav_name_mapping[agent]] if self.uav_stages[self.uav_name_mapping[agent]] == 1
+                     else self.truck_position
+                     ), 
+                 (
+                     self.uav_target_positions[self.uav_name_mapping[agent]] if self.uav_stages[self.uav_name_mapping[agent]] == 1
+                     else self.truck_target_position
+                     )]
+            )
+            for agent in self.agents if match("uav", agent)
         }
         
-        # No difference from the observations and action_masks at reset()
+        # No big difference from the observations and action_masks at reset()
         observations = {
-            self.possible_agents[i]: {
+            agent: {
                 "observation": (
-                np.row_stack([[self.warehouse_position, self.truck_position], self.uav_position, 
-                                 self.customer_position_both, self.customer_position_truck]) if i < self.num_truck 
-                else np.row_stack([[self.warehouse_position, self.truck_position, 
-                                    self.uav_position[(i - self.num_truck) % self.num_uavs]], 
-                                   self.customer_position_both, self.customer_position_uav])), 
-                "action_mask": current_action_masks[self.possible_agents[i]]
-                }
-            for i in range(len(self.possible_agents))
+                    dict({
+                        "pos_obs" : np.row_stack([[self.warehouse_position, self.truck_position], self.uav_position, 
+                                           self.customer_position_truck, self.customer_position_both, self.customer_position_uav]), 
+                        "truck_action_masks" : self.action_masks[1 : -1], 
+                        "uav_action_masks" : np.row_stack([uav_0_masks[ : -1], uav_1_masks[ : -1]])
+                    }) if match("truck", agent)
+                    else dict({
+                        "surroundings" : self.get_obs_by_uav(agent), 
+                        "coordi_info" : coordi[agent]
+                    })
+                ), 
+                # "action_mask": current_action_masks[agent]
+            }
+            for agent in self.agents
         }
 
         # Get dummy infos (not used in this example)
@@ -753,20 +961,7 @@ class DeliveryEnvironmentWithObstacle(ParallelEnv):
         customer_uav_image = get_image(os.path.join("img", "CustomerUAV.png"))
         customer_uav_image = pygame.transform.scale(customer_uav_image, (grid_width * 0.8, grid_height * 0.8))
         
-        # a rendering test
-        # no_fly_zone = self.generate_no_fly_zone()
-        # no_fly_zone_image = pygame.Surface(no_fly_zone[1] / scale)
-        # no_fly_zone_image.fill(COLOR_RESTRICTION)
-        # no_fly_zone_image.set_alpha(100)
-        # grid_num = self.map_size / self.grid_edge
-        # obstacle = self.generate_uav_obstacle(grid_num)
-        
         self.screen.blit(map_image, (0, 0))
-        
-        # self.screen.blit(no_fly_zone_image, no_fly_zone[0] / scale)
-        # obstacle_image = pygame.Surface(position_bias * 0.6, pygame.SRCALPHA)
-        # pygame.draw.circle(obstacle_image, COLOR_OBSTACLE, position_bias * 0.3, obstacle["radius"] / scale)
-        # self.screen.blit(obstacle_image, obstacle["center"] / scale - position_bias * 0.3)
         
         # There is a scale between simulation coordinates and rendering coordinates, here it is 10:1
         self.screen.blit(warehouse_image, self.warehouse_position / scale - position_bias * 0.4)
@@ -776,9 +971,11 @@ class DeliveryEnvironmentWithObstacle(ParallelEnv):
             no_fly_zone_image.set_alpha(100)
             self.screen.blit(no_fly_zone_image, no_fly_zone[0] / scale)
         for uav_obstacle in self.uav_obstacles:
-            uav_obstacle_image = pygame.Surface(position_bias * 0.6, pygame.SRCALPHA)
-            pygame.draw.circle(uav_obstacle_image, COLOR_OBSTACLE, position_bias * 0.3, uav_obstacle["radius"] / scale)
-            self.screen.blit(uav_obstacle_image, uav_obstacle["center"] / scale - position_bias * 0.3)
+            # uav_obstacle_image = pygame.Surface(position_bias * 0.6, pygame.SRCALPHA)
+            # pygame.draw.circle(uav_obstacle_image, COLOR_OBSTACLE, position_bias * 0.3, uav_obstacle[1] / scale)
+            uav_obstacle_image = pygame.Surface(uav_obstacle[1] / scale)
+            uav_obstacle_image.fill(COLOR_OBSTACLE)
+            self.screen.blit(uav_obstacle_image, uav_obstacle[0] / scale)
         for customer in self.customer_position_both:
             self.screen.blit(customer_both_image, customer / scale - position_bias * 0.4)
         for customer in self.customer_position_truck:
@@ -793,7 +990,7 @@ class DeliveryEnvironmentWithObstacle(ParallelEnv):
         if self.render_mode == "human":
             pygame.event.pump()
             pygame.display.update()
-            self.clock.tick(2)
+            self.clock.tick(10)
         
     def close(self):
         if self.screen is not None:
@@ -811,3 +1008,7 @@ def get_image(path):
     sfc = pygame.Surface(image.get_size(), flags=pygame.SRCALPHA)
     sfc.blit(image, (0, 0))
     return sfc
+
+def cross_product_2d_array(v1, v2):
+    return v1[0] * v2[1] - v2[0] * v1[1]
+

@@ -67,7 +67,7 @@ class upper_solver():
         truck_pos = pos_obs[1]
         uav_pos = pos_obs[2 : 2 + num_uavs]
         
-        task_truck_queue = []
+        task_truck_queue = [ 0 ]
         task_uav_0_queue = [ -1 ]
         task_uav_1_queue = [ -1 ]
         truck_queue = []
@@ -100,7 +100,7 @@ class upper_solver():
         # get task queue for truck
         for i in range(self.customer_pos_truck.shape[0]): 
             if truck_action_masks[i]:
-                task_truck_queue.append(i)
+                task_truck_queue.append(i + 1)
         
         # get task queue for uav
         for i in range(self.customer_pos_uav.shape[0]): 
@@ -219,6 +219,7 @@ if __name__ == "__main__":
     observations, infos = env.reset()
     delivery_upper_solver = upper_solver(observations["truck"]["observation"]["pos_obs"])
     
+    # print(observations["uav_0_1"]["observation"]["coordi_info"])
     # print(env.parcels_weight)
     # # print(env.uav_battery_remaining)
     env.render()
@@ -255,8 +256,10 @@ if __name__ == "__main__":
             for agent in env.agents
         }
         observations, rewards, terminations, truncations, infos = env.step(actions)
-        
         env.render()
+        # print(observations["uav_0_1"]["observation"]["coordi_info"])
+
+        
         
     #     # if rewards["Global"] != -1:
     #     #     print("rewards: " + str(rewards["Global"]))
@@ -270,7 +273,7 @@ if __name__ == "__main__":
     # # for agent_obs in observations:
     # #     print(observations[agent_obs]["action_mask"])
     print("pass")
-    # print(observations["uav_0_1"])
+    # print(observations["uav_0_1"]["observation"]["coordi_info"])
     # np.savetxt("obs.txt", np.row_stack([observations[agent_obs]["observation"]["surroundings"][0] for agent_obs in observations if match("uav", agent_obs)]))
     # time.sleep(5)
     # print(total_rewards)

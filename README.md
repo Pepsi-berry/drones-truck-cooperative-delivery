@@ -13,6 +13,8 @@ To-do List:
     - modify the uav collision check logic
   - ~~modify the action mask part~~
     - ~~uav load action mask~~
-  - improve the interface, improve the connection between the upper and the lower
+  - ~~improve the interface, improve the connection between the upper and the lower~~
     - ~~complete the upper solver interface~~
 - load and delivery duration
+- complete a strictly available upper solver
+- **complete the lower uav trajectory solver**

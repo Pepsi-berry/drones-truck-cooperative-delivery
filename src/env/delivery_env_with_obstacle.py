@@ -72,7 +72,7 @@ class DeliveryEnvironmentWithObstacle(ParallelEnv):
                                 ]
         # uav parameters
         # unit here is m/s
-        self.truck_velocity = 7
+        self.truck_velocity = 22
         self.uav_velocity = np.array([12, 29])
         # unit here is kg
         self.uav_capacity = np.array([10, 3.6])
@@ -225,17 +225,17 @@ class DeliveryEnvironmentWithObstacle(ParallelEnv):
         uav_no = uav_info[0] * self.num_uavs_0 + uav_info[1]
         return uav_info + [uav_no]
 
-    def generate_weight(self):
+    def generate_weight(self, lower, partition1, partition2, upper):
         probability = random.random()  # generate a random number between [0, 1)
         if probability < 0.8:
             # 0.8：<= 3.6kg
-            return random.uniform(0, 3.6)
+            return random.uniform(lower, partition1)
         elif probability < 0.9:
             # 0.1：3.6kg - 10kg
-            return random.uniform(3.6, 10)
+            return random.uniform(partition1, partition2)
         else:
             # 0.1：>= 10kg
-            return random.uniform(10.1, 50)
+            return random.uniform(partition2, upper)
 
     # It is necessary to ensure that the no-fly zone does not contain warehouse and 
     # any customer points that only support delivery by uav.
@@ -425,7 +425,11 @@ class DeliveryEnvironmentWithObstacle(ParallelEnv):
         # Distribution of parcels space in parcels_weight: 
         # to customer_both —— to customer_uav
         #      10 here     ——      6 here    
-        self.parcels_weight = np.array([self.generate_weight() for _ in range(self.num_customer_uav)])
+        self.parcels_weight = np.array([
+            self.generate_weight(0, 3.6, 10, 50) if idx < self.num_customer_both
+            else self.generate_weight(0, 3.6, 6, 10) # to make sure all the uav parcel can be delivered
+            for idx in range(self.num_customer_uav)
+            ])
         
         # Initially, the truck departs from the warehouse
         # uavs travel with trucks
@@ -536,9 +540,9 @@ class DeliveryEnvironmentWithObstacle(ParallelEnv):
                     self.uav_masks[action] = 0
                     self.uav_stages[uav_no] = 1
                     if action < self.num_customer_both:
-                        self.uav_target_positions[uav_no] = self.customer_position_both[action]
+                        self.uav_target_positions[uav_no] = copy(self.customer_position_both[action])
                     else:
-                        self.uav_target_positions[uav_no] = self.customer_position_uav[action - self.num_customer_both]                    
+                        self.uav_target_positions[uav_no] = copy(self.customer_position_uav[action - self.num_customer_both])
     
     
     # When the truck performs a new action, it first generates a refined path through genarate_truck_path(),
@@ -546,10 +550,10 @@ class DeliveryEnvironmentWithObstacle(ParallelEnv):
     # (that is, before generating a new action).
     def genarate_truck_path(self, target):
         # get the id of the grid which truck and target located here...
-        id_grid_truck_x = self.truck_position[0] / self.grid_edge
-        id_grid_target_x = target[0] / self.grid_edge
-        id_grid_truck_y = self.truck_position[1] / self.grid_edge
-        id_grid_target_y = target[1] / self.grid_edge
+        id_grid_truck_x = int(self.truck_position[0] / self.grid_edge)
+        id_grid_target_x = int(target[0] / self.grid_edge)
+        id_grid_truck_y = int(self.truck_position[1] / self.grid_edge)
+        id_grid_target_y = int(target[1] / self.grid_edge)
     
         if target[0] == self.truck_position[0] or target[1] == self.truck_position[1]:
             # situation 1:
@@ -618,6 +622,10 @@ class DeliveryEnvironmentWithObstacle(ParallelEnv):
                                                 else [(id_grid_target_x + 1) * self.grid_edge, id_grid_truck_y * self.grid_edge]))
                 self.truck_path.append(np.array([self.truck_path[-1][0], target[1]]))
                 self.truck_path.append(target)
+        
+        # print(id_grid_truck_x, id_grid_truck_y, id_grid_target_x, id_grid_target_y)
+        # print("current: ", self.truck_position)
+        # print("path: ", self.truck_path)
     
     def truck_move(self):
         # target point x, y coordinate
@@ -650,6 +658,7 @@ class DeliveryEnvironmentWithObstacle(ParallelEnv):
         # uav_info = findall(r'\d+', uav)
         # uav_info = [int(num) for num in uav_info]
         # uav_no = uav_info[0] * self.num_uavs_0 + uav_info[1]
+        # print("uav move!")
         uav_no = self.uav_name_mapping[uav]
         
         # print(int(np.cos(action) * self.step_len * self.uav_velocity[uav_info[0]]))
@@ -660,6 +669,12 @@ class DeliveryEnvironmentWithObstacle(ParallelEnv):
         # int-ify or not?
         self.uav_position[uav_no][0] += np.cos(action[0]) * dist
         self.uav_position[uav_no][1] += np.sin(action[0]) * dist
+        
+        uav_target = None
+        if self.uav_stages[uav_no] == 1:
+            uav_target = copy(self.uav_target_positions[uav_no])
+        else:
+            uav_target = copy(self.truck_position)
         
         # tjc_xlo, tjc_xhi, tjc_ylo, tjc_yhi = (
         #     min(src_pos[0], self.uav_position[uav_no][0]), 
@@ -674,7 +689,7 @@ class DeliveryEnvironmentWithObstacle(ParallelEnv):
                 self.uav_position[uav_no] = obstacle[0] + obstacle[1] / 2
                 return -2
             
-        # check if the distance between this uav with others is less than saft distance
+        # check if the distance between this uav with others is less than safe distance
         # to be modified
         for no in range(self.num_uavs):
             if no != uav_no and np.sqrt(np.sum(np.square(self.uav_position[uav_no] - self.uav_position[no]))) < DIST_RESTRICT_UAV:
@@ -682,7 +697,7 @@ class DeliveryEnvironmentWithObstacle(ParallelEnv):
         
         for nfz in self.no_fly_zones:
             if self.uav_tjc_zone_intersect(nfz, src_pos, self.uav_position[uav_no]):
-                print("!!DANGER!!", uav)
+                # print("!!DANGER!!", uav)
                 return -1
         
         # update the remaining battery of uav
@@ -690,8 +705,9 @@ class DeliveryEnvironmentWithObstacle(ParallelEnv):
         
         # when the distance between uav and target is less than a threshold
         # then consider the uav as arrival 
-        if np.sqrt(np.sum(np.square(self.uav_position[uav_no] - self.uav_target_positions[uav_no]))) < DIST_THRESHOLD:
-            self.uav_position[uav_no] = copy(self.uav_target_positions[uav_no])
+        if np.sqrt(np.sum(np.square(self.uav_position[uav_no] - uav_target))) < DIST_THRESHOLD:
+            self.uav_position[uav_no] = copy(uav_target)
+            # print("uav arrive!")
             return 1
         # The uav may also be returned directly to the warehouse, 
         # but note that in this case, this uav will not be activated again.
@@ -699,6 +715,7 @@ class DeliveryEnvironmentWithObstacle(ParallelEnv):
         #     self.uav_position[uav_no] = copy(self.warehouse_position)
         #     return -1
         else:
+            # print("uav not arrive!")
             return 0
         
     def update_action_mask(self, agent, action):
@@ -775,6 +792,11 @@ class DeliveryEnvironmentWithObstacle(ParallelEnv):
                         self.uav_stages[uav_no] -= 1
                         if self.uav_stages[uav_no] == -1:
                             self.infos[agent] = True
+                            # charging after returning completion
+                            self.uav_battery_remaining[uav_no] = self.uav_range[self.get_uav_info[0]]
+                            if np.array_equal(self.uav_target_positions[uav_no], self.truck_target_position):
+                                self.infos["truck"] = True
+                                self.truck_path.clear()
                         # else:
                         #     self.uav_target_positions[uav_no] = self.truck_position
                         rewards[agent] += REWARD_UAV_ARRIVAL
@@ -889,7 +911,7 @@ class DeliveryEnvironmentWithObstacle(ParallelEnv):
                 [self.uav_position[self.uav_name_mapping[agent]], 
                  (
                      self.uav_target_positions[self.uav_name_mapping[agent]] if self.uav_stages[self.uav_name_mapping[agent]] == 1
-                     else self.truck_position
+                     else self.truck_position # when the stage == -1, result doesn't matter
                      ), 
                  (
                      self.uav_target_positions[self.uav_name_mapping[agent]] if self.uav_stages[self.uav_name_mapping[agent]] == 1

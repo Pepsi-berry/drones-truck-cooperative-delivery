@@ -1,19 +1,20 @@
-# import os
 import numpy as np
 from re import match, findall
-# from copy import copy
 import random
-# import glob
-import time
-# import supersuit as ss
-# from env.delivery_env import DeliveryEnvironment
 from env.delivery_env_with_obstacle import DeliveryEnvironmentWithObstacle
-# from stable_baselines3 import PPO
-# from pettingzoo.test import parallel_api_test
-# from pettingzoo.utils import parallel_to_aec
-# from stable_baselines3.common.evaluation import evaluate_policy
+from pettingzoo.test import parallel_api_test # , render_test
 from gymnasium.spaces import MultiDiscrete, Dict, MultiBinary, Box
 from pettingzoo.utils.env import ActionType, AgentID, ObsType, ParallelEnv
+# import os
+# from copy import copy
+# import glob
+# import time
+# import supersuit as ss
+# from env.delivery_env import DeliveryEnvironment
+# from stable_baselines3 import PPO
+# from pettingzoo.utils import parallel_to_aec
+# from stable_baselines3.common.evaluation import evaluate_policy
+
 
 MAX_INT = 100
 
@@ -159,12 +160,12 @@ if __name__ == "__main__":
     # a = 3
     # print(b + [a])
     
-    possible_agents = ["truck", 
-                            "uav_0_0", "uav_0_1", 
-                            "uav_1_0", "uav_1_1", 
-                            "uav_1_2", "uav_1_3", 
-                            ]
-    uav_velocity = np.array([12, 29])
+    # possible_agents = ["truck", 
+    #                         "uav_0_0", "uav_0_1", 
+    #                         "uav_1_0", "uav_1_1", 
+    #                         "uav_1_2", "uav_1_3", 
+    #                         ]
+    # uav_velocity = np.array([12, 29])
     # uav_name_mapping = dict(zip([agent for agent in possible_agents if not match("truck", agent) ],
     #                                     list(range(6))))
     # print(uav_name_mapping)
@@ -195,6 +196,8 @@ if __name__ == "__main__":
     #     print(action_spaces[a])
     
     env = DeliveryEnvironmentWithObstacle(render_mode="human")
+    parallel_api_test(env, num_cycles=1000)
+    # render_test(DeliveryEnvironmentWithObstacle)
     
     # print(
     #     np.row_stack([env.truck_position, env.truck_position, 
@@ -222,7 +225,7 @@ if __name__ == "__main__":
     # print(observations["uav_0_1"]["observation"]["coordi_info"])
     # print(env.parcels_weight)
     # # print(env.uav_battery_remaining)
-    env.render()
+    # env.render()
     # total_rewards = None
     # time_step = 0
     # # for _ in range(20):
@@ -237,7 +240,7 @@ if __name__ == "__main__":
     # print(observations["uav_0_1"])
     # np.savetxt("obs.txt", np.row_stack([observations[agent_obs]["observation"]["surroundings"][0] for agent_obs in observations if match("uav", agent_obs)]))
     
-    for i in range(50):
+    for i in range(150):
         # this is where you would insert your policy
         if infos["truck"] or (i % 6 == 0):
             TA_Scheduling_action = delivery_upper_solver.solve(observations["truck"]["observation"], infos, env.num_uavs, env.uav_range)
@@ -256,7 +259,7 @@ if __name__ == "__main__":
             for agent in env.agents
         }
         observations, rewards, terminations, truncations, infos = env.step(actions)
-        env.render()
+        # env.render()
         # print(observations["uav_0_1"]["observation"]["coordi_info"])
 
         

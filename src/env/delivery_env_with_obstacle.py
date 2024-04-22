@@ -42,11 +42,30 @@ class DeliveryEnvironmentWithObstacle(ParallelEnv):
     """
 
     metadata = {
-        "render_mode": [None, "human"],
+        "render_modes": [None, "human"],
         "name": "delivery_environment_v2",
     }
 
-    def __init__(self, render_mode=None):
+    def __init__(
+        self, 
+        MAX_STEP=100_000, 
+        step_len=10, 
+        truck_velocity=7, 
+        uav_velocity=np.array([12, 29]), 
+        uav_capacity=np.array([10, 3.6]), 
+        uav_range=np.array([10_000, 15_000]), 
+        uav_obs_range=151, 
+        num_truck=1, 
+        num_uavs=6, 
+        num_uavs_0=2, 
+        num_uavs_1=4, 
+        num_parcels=20, 
+        num_parcels_truck=4, 
+        num_parcels_uav=6, 
+        num_uav_obstacle=20, 
+        num_no_fly_zone=8, 
+        render_mode=None
+        ):
         """The init method takes in environment arguments.
 
 
@@ -60,9 +79,9 @@ class DeliveryEnvironmentWithObstacle(ParallelEnv):
             self.clock = pygame.time.Clock()
         
         # self.MAX_STEP = 1_000_000
-        self.MAX_STEP = 100_000
-        self.step_len = 10
-        self.time_step = None
+        self.MAX_STEP = MAX_STEP
+        self.step_len = step_len
+        self.time_step = 0
         
         self.possible_agents = ["truck", 
                                 # "upper_solver"
@@ -72,25 +91,25 @@ class DeliveryEnvironmentWithObstacle(ParallelEnv):
                                 ]
         # uav parameters
         # unit here is m/s
-        self.truck_velocity = 22
-        self.uav_velocity = np.array([12, 29])
+        self.truck_velocity = truck_velocity
+        self.uav_velocity = copy(uav_velocity)
         # unit here is kg
-        self.uav_capacity = np.array([10, 3.6])
+        self.uav_capacity = copy(uav_capacity)
         # unit here is m
         # self.uav_range = 15_000, 20_000
-        self.uav_range = np.array([10_000, 15_000])
-        self.uav_obs_range = 151
+        self.uav_range = copy(uav_range)
+        self.uav_obs_range = uav_obs_range
         
-        self.num_truck = 1
-        self.num_uavs = 6
-        self.num_uavs_0 = 2
-        self.num_uavs_1 = 4
+        self.num_truck = num_truck
+        self.num_uavs = num_uavs
+        self.num_uavs_0 = num_uavs_0
+        self.num_uavs_1 = num_uavs_1
         # self.max_num_agents = self.num_truck + self.num_uavs # wrong operation
         
         # parcels parameters
-        self.num_parcels = 20
-        self.num_parcels_truck = 4
-        self.num_parcels_uav = 6
+        self.num_parcels = num_parcels
+        self.num_parcels_truck = num_parcels_truck
+        self.num_parcels_uav = num_parcels_uav
         self.num_customer_truck = self.num_parcels - self.num_parcels_uav
         self.num_customer_uav = self.num_parcels - self.num_parcels_truck
         self.num_customer_both = self.num_parcels - self.num_parcels_truck - self.num_parcels_uav
@@ -101,8 +120,8 @@ class DeliveryEnvironmentWithObstacle(ParallelEnv):
         self.grid_edge = 250 # m as unit here
         
         # obstacle parameters
-        self.num_uav_obstacle = 20
-        self.num_no_fly_zone = 8
+        self.num_uav_obstacle = num_uav_obstacle
+        self.num_no_fly_zone = num_no_fly_zone
         
         self.uav_name_mapping = dict(zip([agent for agent in self.possible_agents if match("uav", agent)],
                                          list(range(self.num_uavs))))
@@ -123,6 +142,7 @@ class DeliveryEnvironmentWithObstacle(ParallelEnv):
         # agent positions, warehouse positions, customer positions, 
         # action masks to prevent invalid actions to be taken
         self.agents = None
+        self.dead_agent_list = None
         self.truck_position = None
         self.uav_position = None
         self.uav_battery_remaining = None
@@ -390,6 +410,7 @@ class DeliveryEnvironmentWithObstacle(ParallelEnv):
                        "uav_1_0", "uav_1_1", 
                        "uav_1_2", "uav_1_3", 
                        ]
+        self.dead_agent_list = []
         self.uav_stages = np.ones(self.num_uavs) * (-1)
         # The warehouse is located in the center of the map
         self.warehouse_position = np.array([self.map_size / 2, self.map_size / 2])
@@ -725,6 +746,12 @@ class DeliveryEnvironmentWithObstacle(ParallelEnv):
         # else:
         #     self.uav_masks[action] = 0
         pass
+    
+    
+    # Convert the normalized action back to the range of the original action distribution
+    def denormalize_action(self, action):
+        action[0] = action[0] * np.pi + np.pi
+        action[1] = action[1] * (self.uav_velocity) / 2 + (self.uav_velocity) / 2
 
 
     def step(self, actions):
@@ -741,6 +768,9 @@ class DeliveryEnvironmentWithObstacle(ParallelEnv):
 
         And any internal state used by observe() or render()
         """
+        # while self.dead_agent_list:
+        #     self.agents.remove(self.dead_agent_list.pop())
+        
         rewards = {
             # "Global": -1, # get -1 reward every transitions to encourage faster delivery
             agent: REWARD_URGENCY for agent in self.agents if match("uav", agent)
@@ -786,6 +816,7 @@ class DeliveryEnvironmentWithObstacle(ParallelEnv):
                     if self.uav_battery_remaining[uav_no] <= 0:
                         # that means uav's battery died and uav wrecked
                         self.agents.remove(agent)
+                        # self.dead_agent_list.append(agent)
                         self.infos.pop(agent)
                         rewards["Global"] += REWARD_UAV_WRECK
                     if uav_moving_result == 1:
@@ -804,6 +835,7 @@ class DeliveryEnvironmentWithObstacle(ParallelEnv):
                         rewards[agent] += REWARD_UAV_VIOLATE
                     elif uav_moving_result == -2:
                         self.agents.remove(agent)
+                        # self.dead_agent_list.append(agent)
                         self.infos.pop(agent)
                         rewards[agent] += REWARD_UAV_WRECK
                     else: # uav-and-uav collision case, to be complete...
@@ -1033,4 +1065,3 @@ def get_image(path):
 
 def cross_product_2d_array(v1, v2):
     return v1[0] * v2[1] - v2[0] * v1[1]
-

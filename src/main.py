@@ -267,10 +267,13 @@ class upper_solver():
                 if (task - 1 - self.num_truck_customer) in task_uav_1_queue:
                     task_uav_1_queue.remove((task - 1 - self.num_truck_customer))
         
-        print(actions)
+        # print(actions)
         return actions
 
-
+# probably we need to implement the marl algorithm by ourselves :(
+class PPO():
+    def __init__(self) -> None:
+        pass
 
 if __name__ == "__main__":
     

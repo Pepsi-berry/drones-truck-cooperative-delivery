@@ -24,7 +24,9 @@ REWARD_VICTORY = 100
 REWARD_UAV_WRECK = -200
 REWARD_UAV_VIOLATE = -100
 REWARD_UAV_ARRIVAL = 1
-REWARD_URGENCY = -0.1
+REWARD_URGENCY = -0.2
+REWARD_APPROUCHING = 0.01 # get REWARD_APPROUCHING when get closer to target
+REWARD_SLOW = -0.02
 # color used when rendering no-fly zones and obstacles
 COLOR_RESTRICTION = (255, 122, 122)
 COLOR_OBSTACLE = (254, 195, 106)
@@ -49,7 +51,7 @@ class UAVTrainingEnvironmentWithObstacle(Env):
 
     def __init__(
         self, 
-        MAX_STEP=100_000, 
+        MAX_STEP=10_000, 
         step_len=10, 
         truck_velocity=7, 
         uav_velocity=29, 
@@ -108,7 +110,7 @@ class UAVTrainingEnvironmentWithObstacle(Env):
         self.uav_position = None
         self.uav_battery_remaining = None
         # variables used to help representing the movements of the agent in step()
-        self.uav_target_positions = None
+        self.uav_target_position = None
         self.truck_target_position = None
         self.truck_path = None
         
@@ -277,8 +279,12 @@ class UAVTrainingEnvironmentWithObstacle(Env):
         """
         # set the time step to 0 initially
         self.time_step = 0
-        # 0 means customer, 1 means truck
-        self.option = random.randint(0, 1)
+        # 0 means truck, 1 means customer
+        if options is None:
+            # self.option = random.randint(0, 1)
+            self.option = 1
+        else:
+            self.option = options
         
         grid_num = self.map_size / self.grid_edge
         
@@ -298,15 +304,16 @@ class UAVTrainingEnvironmentWithObstacle(Env):
              else [random.randint(0.2 * grid_num, 0.8 * grid_num)*self.grid_edge, random.randint(0.2 * self.map_size, 0.8 * self.map_size)] 
         )
         
-        offset = np.array([random.randint(-1500, 1500), random.randint(-1500, 1500)])
+        generative_range = 750
+        offset = np.array([random.randint(-1 * generative_range, generative_range), random.randint(-1 * generative_range, generative_range)])
         target_of_target = None
         if self.option:
-            self.uav_target_positions = self.customer_position
+            self.uav_target_position = self.customer_position
             target_of_target = self.customer_position
         else:
-            self.uav_target_positions = self.truck_position
+            self.uav_target_position = self.truck_position
             target_of_target = self.truck_target_position
-        self.uav_position = self.uav_target_positions + offset
+        self.uav_position = self.uav_target_position + offset
 
         # Set the initial power of the uav to the full charge
         self.uav_battery_remaining = self.uav_range
@@ -318,7 +325,7 @@ class UAVTrainingEnvironmentWithObstacle(Env):
 
         observations = dict({
             "surroundings" : self.get_obs(), 
-            "coordi_info" : np.concatenate([self.uav_position, self.uav_target_positions, target_of_target])
+            "coordi_info" : np.concatenate([self.uav_position, self.uav_target_position, target_of_target])
             })
         
         # # Get dummy infos. Necessary for proper parallel_to_aec conversion
@@ -445,7 +452,7 @@ class UAVTrainingEnvironmentWithObstacle(Env):
         self.uav_position[0] += np.cos(action[0]) * dist
         self.uav_position[1] += np.sin(action[0]) * dist
         
-        uav_target = self.uav_target_positions
+        uav_target = self.uav_target_position
         
         for obstacle in self.uav_obstacles:
             # if insersect or not
@@ -493,7 +500,7 @@ class UAVTrainingEnvironmentWithObstacle(Env):
         
         self.denormalize_action(action)
         # get -0.1 reward every transitions to encourage faster delivery
-        rewards = REWARD_URGENCY
+        rewards = REWARD_URGENCY + max((self.uav_velocity / 3) - action[1], 0) * REWARD_SLOW
         
         # Execute actions
         ####
@@ -502,6 +509,7 @@ class UAVTrainingEnvironmentWithObstacle(Env):
         # - Update agent state (i.e. infos)
         # - Get the rewards including global rewards and returning rewards
         
+        dist_before = np.sqrt(np.sum(np.square(self.uav_position - self.uav_target_position)))
         # truck moves
         # in the first movement, a refined path needs to be generated.
         if not self.truck_path:
@@ -527,6 +535,9 @@ class UAVTrainingEnvironmentWithObstacle(Env):
         elif uav_moving_result == -2:
             rewards += REWARD_UAV_WRECK
             terminated = True
+        else:
+            dist_diff = dist_before - np.sqrt(np.sum(np.square(self.uav_position - self.uav_target_position)))
+            rewards += REWARD_APPROUCHING * dist_diff
 
         # Check truncation conditions (overwrites termination conditions)
         ####
@@ -546,7 +557,7 @@ class UAVTrainingEnvironmentWithObstacle(Env):
             target_of_target = self.truck_target_position
         
         coordi = np.concatenate([
-                self.uav_position, self.uav_target_positions, target_of_target
+                self.uav_position, self.uav_target_position, target_of_target
                 ])
         
         # No big difference from the observations and action_masks at reset()

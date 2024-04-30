@@ -2,8 +2,9 @@ import numpy as np
 from re import match, findall
 import random
 from env.delivery_env_with_obstacle import DeliveryEnvironmentWithObstacle
+# from env.uav_env import UAVTrainingEnvironmentWithObstacle
 from pettingzoo.test import parallel_api_test # , render_test
-from gymnasium.spaces import MultiDiscrete, Dict, MultiBinary, Box
+# from gymnasium.spaces import MultiDiscrete, Dict, MultiBinary, Box
 from pettingzoo.utils.env import ActionType, AgentID, ObsType, ParallelEnv
 # import os
 # from copy import copy
@@ -196,7 +197,8 @@ if __name__ == "__main__":
     #     print(action_spaces[a])
     
     env = DeliveryEnvironmentWithObstacle(render_mode="human")
-    parallel_api_test(env, num_cycles=1000)
+    # env = UAVTrainingEnvironmentWithObstacle()
+    # parallel_api_test(env, num_cycles=1000)
     # render_test(DeliveryEnvironmentWithObstacle)
     
     # print(
@@ -214,7 +216,7 @@ if __name__ == "__main__":
     # print(len(uav_obs_space))
     # env.reset()
     
-    # # parallel_api_test(env, num_cycles=1_000)
+    # parallel_api_test(env, num_cycles=10_000)
     
     # arr = np.ones([2, 3, 4])
     # print(arr.shape)

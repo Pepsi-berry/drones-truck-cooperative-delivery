@@ -56,14 +56,15 @@ class UAVTrainingEnvironmentWithObstacle(Env):
         truck_velocity=7, 
         uav_velocity=29, 
         uav_range=15_000, 
-        uav_obs_range=151, 
+        uav_obs_range=150, 
         num_uav_obstacle=20, 
         num_no_fly_zone=8, 
         render_mode=None
         ):
         """The init method takes in environment arguments.
-
-
+        
+        ensure that the uav_obs_range devisible by pooling_kernal_size=5
+        
         These attributes should not be changed after initialization.
         """
         ##########################################################################################
@@ -86,7 +87,8 @@ class UAVTrainingEnvironmentWithObstacle(Env):
         # unit here is m
         # self.uav_range = 15_000, 20_000
         self.uav_range = uav_range
-        self.uav_obs_range = uav_obs_range
+        self.uav_obs_pooling_kernal = 5
+        self.uav_obs_range = uav_obs_range + self.uav_obs_pooling_kernal
         
         # map parameters
         self.map_size = 10_000 # m as unit here
@@ -131,9 +133,10 @@ class UAVTrainingEnvironmentWithObstacle(Env):
         self.observation_space = Dict(
             {
                 # 2 means no-fly zones, obstacles & uavs.
-                "surroundings": MultiBinary([2, self.uav_obs_range, self.uav_obs_range]), 
-                # 3 means uav, target, target of target
-                "coordi_info": MultiDiscrete(np.full([3 * 2], self.map_size + 1))
+                "surroundings": MultiBinary([1, self.uav_obs_range, self.uav_obs_range]), 
+                # 2 vectors representing uav to target, target to target of target
+                # "vecs": MultiDiscrete(np.full([2 * 2], self.map_size * 2 + 1))
+                "vecs": Box(low=-1 * self.map_size, high=self.map_size, shape=[4, ], dtype=np.int32)
             }
         )
     
@@ -233,9 +236,9 @@ class UAVTrainingEnvironmentWithObstacle(Env):
     
     def get_obs(self):
         uav_position = self.uav_position
-        uav_obs = np.zeros([2, self.uav_obs_range, self.uav_obs_range], dtype=np.int8)
-        uav_obs[0] = 1
-        obs_radius = self.uav_obs_range / 2
+        uav_obs = np.ones([1, self.uav_obs_range, self.uav_obs_range], dtype=np.int8)
+        # uav_obs[0] = 1
+        obs_radius = int(self.uav_obs_range / 2)
         x_offset = uav_position[0] - obs_radius
         y_offset = uav_position[1] - obs_radius
         
@@ -259,8 +262,8 @@ class UAVTrainingEnvironmentWithObstacle(Env):
             intersection = self.zones_intersection(obstacle, xlo, xhi, ylo, yhi)
             if intersection is None:
                 continue
-            uav_obs[1][int(intersection[0] - x_offset) : int(intersection[1] - x_offset)][int(intersection[2] - y_offset) : int(intersection[3] - y_offset)] = 1
-                
+            uav_obs[0][int(intersection[0] - x_offset) : int(intersection[1] - x_offset)][int(intersection[2] - y_offset) : int(intersection[3] - y_offset)] = 1
+        
         return uav_obs
     
     def reset(self, seed=None, options=None):
@@ -291,21 +294,24 @@ class UAVTrainingEnvironmentWithObstacle(Env):
         rn = random.randint(0, 1)
         self.truck_position = np.array(
             [random.randint(0.2 * self.map_size, 0.8 * self.map_size), random.randint(0.2 * grid_num, 0.8 * grid_num)*self.grid_edge] if rn % 2 
-             else [random.randint(0.2 * grid_num, 0.8 * grid_num)*self.grid_edge, random.randint(0.2 * self.map_size, 0.8 * self.map_size)] 
+             else [random.randint(0.2 * grid_num, 0.8 * grid_num)*self.grid_edge, random.randint(0.2 * self.map_size, 0.8 * self.map_size)], 
+             dtype=np.int32
         )
         rn = random.randint(0, 1)
         self.customer_position = np.array(
             [random.randint(0.2 * self.map_size, 0.8 * self.map_size), random.randint(0.2 * grid_num, 0.8 * grid_num)*self.grid_edge] if rn % 2 
-             else [random.randint(0.2 * grid_num, 0.8 * grid_num)*self.grid_edge, random.randint(0.2 * self.map_size, 0.8 * self.map_size)] 
+             else [random.randint(0.2 * grid_num, 0.8 * grid_num)*self.grid_edge, random.randint(0.2 * self.map_size, 0.8 * self.map_size)], 
+             dtype=np.int32
         )
         rn = random.randint(0, 1)
         self.truck_target_position = np.array(
             [random.randint(0.2 * self.map_size, 0.8 * self.map_size), random.randint(0.2 * grid_num, 0.8 * grid_num)*self.grid_edge] if rn % 2 
-             else [random.randint(0.2 * grid_num, 0.8 * grid_num)*self.grid_edge, random.randint(0.2 * self.map_size, 0.8 * self.map_size)] 
+             else [random.randint(0.2 * grid_num, 0.8 * grid_num)*self.grid_edge, random.randint(0.2 * self.map_size, 0.8 * self.map_size)], 
+             dtype=np.int32
         )
         
         generative_range = 750
-        offset = np.array([random.randint(-1 * generative_range, generative_range), random.randint(-1 * generative_range, generative_range)])
+        offset = np.array([random.randint(-1 * generative_range, generative_range), random.randint(-1 * generative_range, generative_range)], dtype=np.int32)
         target_of_target = None
         if self.option:
             self.uav_target_position = self.customer_position
@@ -325,7 +331,10 @@ class UAVTrainingEnvironmentWithObstacle(Env):
 
         observations = dict({
             "surroundings" : self.get_obs(), 
-            "coordi_info" : np.concatenate([self.uav_position, self.uav_target_position, target_of_target])
+            "vecs" : np.concatenate([
+                self.uav_target_position - self.uav_position, 
+                target_of_target - self.uav_target_position
+                ])
             })
         
         # # Get dummy infos. Necessary for proper parallel_to_aec conversion
@@ -557,13 +566,14 @@ class UAVTrainingEnvironmentWithObstacle(Env):
             target_of_target = self.truck_target_position
         
         coordi = np.concatenate([
-                self.uav_position, self.uav_target_position, target_of_target
+                self.uav_target_position - self.uav_position, 
+                target_of_target - self.uav_target_position
                 ])
         
         # No big difference from the observations and action_masks at reset()
         observations = dict({
             "surroundings" : self.get_obs(), 
-            "coordi_info" : coordi
+            "vecs" : coordi
             })
         
         info = {

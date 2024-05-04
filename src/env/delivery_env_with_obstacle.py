@@ -20,9 +20,9 @@ DIST_RESTRICT_OBSTACLE = 75
 # rewards in various situations
 REWARD_DELIVERY = 20
 REWARD_VICTORY = 100
-REWARD_UAV_WRECK = -200
-REWARD_UAV_VIOLATE = -100
-REWARD_UAV_ARRIVAL = 1
+REWARD_UAV_WRECK = -50
+REWARD_UAV_VIOLATE = -50
+REWARD_UAV_ARRIVAL = 5
 REWARD_URGENCY = -0.2
 REWARD_APPROUCHING = 0.01 # get REWARD_APPROUCHING when get closer to target
 REWARD_SLOW = -0.02
@@ -87,9 +87,9 @@ class DeliveryEnvironmentWithObstacle(ParallelEnv):
         
         self.possible_agents = ["truck", 
                                 # "upper_solver"
-                                "uav_0_0", "uav_0_1", 
-                                "uav_1_0", "uav_1_1", 
-                                "uav_1_2", "uav_1_3", 
+                                "uav_0_0", # "uav_0_1", 
+                                # "uav_1_0", "uav_1_1", 
+                                # "uav_1_2", "uav_1_3", 
                                 ]
         # uav parameters
         # unit here is m/s
@@ -369,20 +369,20 @@ class DeliveryEnvironmentWithObstacle(ParallelEnv):
             min(uav_position[1] + obs_radius, self.map_size)
         )
         # no-fly zones obs
-        uav_obs[0][int(xlo - x_offset) : int(xhi - x_offset) + 1][int(ylo - y_offset) : int(yhi - y_offset) + 1] = 0
+        uav_obs[0][int(xlo - x_offset) : int(xhi - x_offset) + 1, int(ylo - y_offset) : int(yhi - y_offset) + 1] = 0
         
         for nfz in self.no_fly_zones:
             intersection = self.zones_intersection(nfz, xlo, xhi, ylo, yhi)
             if intersection is None:
                 continue
-            uav_obs[0][int(intersection[0] - x_offset) : int(intersection[1] - x_offset)][int(intersection[2] - y_offset) : int(intersection[3] - y_offset)] = 1
+            uav_obs[0][int(intersection[0] - x_offset) : int(intersection[1] - x_offset), int(intersection[2] - y_offset) : int(intersection[3] - y_offset)] = 1
         
         # obstacles obs
         for obstacle in self.uav_obstacles:
             intersection = self.zones_intersection(obstacle, xlo, xhi, ylo, yhi)
             if intersection is None:
                 continue
-            uav_obs[0][int(intersection[0] - x_offset) : int(intersection[1] - x_offset)][int(intersection[2] - y_offset) : int(intersection[3] - y_offset)] = 1
+            uav_obs[0][int(intersection[0] - x_offset) : int(intersection[1] - x_offset), int(intersection[2] - y_offset) : int(intersection[3] - y_offset)] = 1
         
         # uav obs
         for uav in self.uav_position:
@@ -409,9 +409,9 @@ class DeliveryEnvironmentWithObstacle(ParallelEnv):
         self.time_step = 0
         # Initially, all UAVs are in state of loaded in truck
         self.agents = ["truck", 
-                       "uav_0_0", "uav_0_1", 
-                       "uav_1_0", "uav_1_1", 
-                       "uav_1_2", "uav_1_3", 
+                       "uav_0_0", # "uav_0_1", 
+                    #    "uav_1_0", "uav_1_1", 
+                    #    "uav_1_2", "uav_1_3", 
                        ]
         self.dead_agent_list = []
         self.uav_stages = np.ones(self.num_uavs) * (-1)
@@ -440,7 +440,7 @@ class DeliveryEnvironmentWithObstacle(ParallelEnv):
         
         # Initially, the target points of all agents are not determined
         # So the truck path is set to empty
-        self.uav_target_positions = np.ones([self.num_uavs, 2]) * (-1)
+        self.uav_target_positions = np.ones([self.num_uavs, 2], dtype=np.int32) * (-1)
         self.truck_target_position = np.ones(2) * -1
         self.truck_path = []
         
@@ -500,8 +500,7 @@ class DeliveryEnvironmentWithObstacle(ParallelEnv):
         # }
         
         observations = {
-            agent: {
-                "observation": (
+            agent: 
                     dict({
                         "pos_obs" : np.row_stack([[self.warehouse_position, self.truck_position], self.uav_position, 
                                            self.customer_position_truck, self.customer_position_both, self.customer_position_uav]), 
@@ -520,12 +519,11 @@ class DeliveryEnvironmentWithObstacle(ParallelEnv):
                         "vecs" : np.concatenate([
                             self.truck_position - self.uav_position[self.uav_name_mapping[agent]], 
                             self.truck_position - self.truck_position
-                            ])
+                            ]).astype(np.int32)
                     })
-                ), 
+                
                 # "action_mask": current_action_masks[agent]
-            }
-            for agent in self.agents
+                    for agent in self.agents
         }
         
         # # Get dummy infos. Necessary for proper parallel_to_aec conversion
@@ -756,9 +754,12 @@ class DeliveryEnvironmentWithObstacle(ParallelEnv):
     
     
     # Convert the normalized action back to the range of the original action distribution
-    def denormalize_action(self, action):
-        action[0] = action[0] * np.pi + np.pi
-        action[1] = action[1] * (self.uav_velocity) / 2 + (self.uav_velocity) / 2
+    def denormalize_action(self, actions):
+        for agent in actions:
+            if match("uav", agent):
+                # print(agent, actions[agent])
+                actions[agent][0] = actions[agent][0] * np.pi + np.pi
+                actions[agent][1] = actions[agent][1] * (self.uav_velocity[1]) / 2 + (self.uav_velocity[1]) / 2
 
 
     def step(self, actions):
@@ -778,6 +779,8 @@ class DeliveryEnvironmentWithObstacle(ParallelEnv):
         # while self.dead_agent_list:
         #     self.agents.remove(self.dead_agent_list.pop())
         
+        self.denormalize_action(actions)
+        
         rewards = {
             agent: REWARD_URGENCY for agent in self.agents if match("uav", agent)
             # get -0.1 reward every transitions to encourage faster delivery
@@ -796,7 +799,7 @@ class DeliveryEnvironmentWithObstacle(ParallelEnv):
         if not self.truck_path:
             self.genarate_truck_path(self.truck_target_position)
             # self.update_action_mask(agent, self.truck_target_position)
-        if self.truck_move():
+        if actions and self.truck_move():
             self.infos["truck"] = True
             # calculate reward when arriving to target
             if np.array_equal(self.truck_position, self.warehouse_position):
@@ -962,22 +965,20 @@ class DeliveryEnvironmentWithObstacle(ParallelEnv):
         
         # No big difference from the observations and action_masks at reset()
         observations = {
-            agent: {
-                "observation": (
+            agent: 
                     dict({
                         "pos_obs" : np.row_stack([[self.warehouse_position, self.truck_position], self.uav_position, 
-                                           self.customer_position_truck, self.customer_position_both, self.customer_position_uav]), 
+                                        self.customer_position_truck, self.customer_position_both, self.customer_position_uav]), 
                         "truck_action_masks" : self.action_masks[1 : -1], 
                         "uav_action_masks" : np.row_stack([uav_0_masks[ : -1], uav_1_masks[ : -1]])
                     }) if match("truck", agent)
                     else dict({
                         "surroundings" : self.get_obs_by_uav(agent), 
-                        "vecs" : coordi[agent]
+                        "vecs" : coordi[agent].astype(np.int32)
                     })
-                ), 
+                    
                 # "action_mask": current_action_masks[agent]
-            }
-            for agent in self.agents
+                    for agent in self.agents
         }
 
         # Get dummy infos (not used in this example)

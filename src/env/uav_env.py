@@ -21,9 +21,9 @@ DIST_RESTRICT_OBSTACLE = 75
 # rewards in various situations
 REWARD_DELIVERY = 20
 REWARD_VICTORY = 100
-REWARD_UAV_WRECK = -200
-REWARD_UAV_VIOLATE = -100
-REWARD_UAV_ARRIVAL = 1
+REWARD_UAV_WRECK = -1
+REWARD_UAV_VIOLATE = -1
+REWARD_UAV_ARRIVAL = 5
 REWARD_URGENCY = -0.2
 REWARD_APPROUCHING = 0.01 # get REWARD_APPROUCHING when get closer to target
 REWARD_SLOW = -0.02
@@ -162,10 +162,10 @@ class UAVTrainingEnvironmentWithObstacle(Env):
     def generate_no_fly_zone(self):
         while True:
             not_suitable = False
-            upper_left_corner = np.array([random.randint(self.grid_edge, self.map_size - 4 * self.grid_edge),
-                                        random.randint(self.grid_edge, self.map_size - 4 * self.grid_edge)])
-            range_size = np.array([random.randrange(self.grid_edge, 3 * self.grid_edge, step=5), 
-                                random.randrange(self.grid_edge, 3 * self.grid_edge, step=5)])
+            upper_left_corner = np.array([random.randint(4 * self.grid_edge, self.map_size - 5 * self.grid_edge),
+                                        random.randint(4 * self.grid_edge, self.map_size - 5 * self.grid_edge)])
+            range_size = np.array([random.randrange(0.6 * self.grid_edge, 1 * self.grid_edge, step=5), 
+                                random.randrange(0.6 * self.grid_edge, 1 * self.grid_edge, step=5)])
             lower_right_corner = upper_left_corner + range_size
             if self.uav_position[0] > upper_left_corner[0] and self.uav_position[0] < lower_right_corner[0] and self.uav_position[1] > upper_left_corner[1] and self.uav_position[1] < lower_right_corner[1]:
                 not_suitable = True
@@ -190,9 +190,9 @@ class UAVTrainingEnvironmentWithObstacle(Env):
         else:
             return np.array([
                 max(xlo, lower_left[0]), 
-                min(xhi, upper_right[0]) + 1, 
+                min(xhi, upper_right[0]), 
                 max(ylo, lower_left[1]), 
-                min(yhi, upper_right[1]) + 1])
+                min(yhi, upper_right[1])])
             
     def zones_intersection_fast_check(self, lower_left, upper_right, xlo, xhi, ylo, yhi):
         return not (xlo > upper_right[0] or xhi < lower_left[0] or ylo > upper_right[1] or yhi < lower_left[1])
@@ -249,24 +249,24 @@ class UAVTrainingEnvironmentWithObstacle(Env):
             min(uav_position[1] + obs_radius, self.map_size)
         )
         # no-fly zones obs
-        uav_obs[0][int(xlo - x_offset) : int(xhi - x_offset) + 1][int(ylo - y_offset) : int(yhi - y_offset) + 1] = 0
+        uav_obs[0][int(xlo - x_offset) : int(xhi - x_offset) + 1, int(ylo - y_offset) : int(yhi - y_offset) + 1] = 0
         
         for nfz in self.no_fly_zones:
             intersection = self.zones_intersection(nfz, xlo, xhi, ylo, yhi)
             if intersection is None:
                 continue
-            uav_obs[0][int(intersection[0] - x_offset) : int(intersection[1] - x_offset)][int(intersection[2] - y_offset) : int(intersection[3] - y_offset)] = 1
+            uav_obs[0][int(intersection[0] - x_offset) : int(intersection[1] - x_offset), int(intersection[2] - y_offset) : int(intersection[3] - y_offset)] = 1
         
         # obstacles obs
         for obstacle in self.uav_obstacles:
             intersection = self.zones_intersection(obstacle, xlo, xhi, ylo, yhi)
             if intersection is None:
                 continue
-            uav_obs[0][int(intersection[0] - x_offset) : int(intersection[1] - x_offset)][int(intersection[2] - y_offset) : int(intersection[3] - y_offset)] = 1
+            uav_obs[0][int(intersection[0] - x_offset) : int(intersection[1] - x_offset), int(intersection[2] - y_offset) : int(intersection[3] - y_offset)] = 1
         
         return uav_obs
     
-    def reset(self, seed=None, options=None):
+    def reset(self, seed=None, options=None, p0=None):
         """Reset set the environment to a starting point.
 
         It needs to initialize the following attributes:
@@ -284,8 +284,9 @@ class UAVTrainingEnvironmentWithObstacle(Env):
         self.time_step = 0
         # 0 means truck, 1 means customer
         if options is None:
-            # self.option = random.randint(0, 1)
-            self.option = 1
+            # self.option = 1 - random.randint(0, 1) * random.randint(0, 1) * random.randint(0, 1)
+            self.option = 1 - int(random.randint(1, 32) / 32)
+            # self.option = 0
         else:
             self.option = options
         
@@ -293,20 +294,20 @@ class UAVTrainingEnvironmentWithObstacle(Env):
         
         rn = random.randint(0, 1)
         self.truck_position = np.array(
-            [random.randint(0.2 * self.map_size, 0.8 * self.map_size), random.randint(0.2 * grid_num, 0.8 * grid_num)*self.grid_edge] if rn % 2 
-             else [random.randint(0.2 * grid_num, 0.8 * grid_num)*self.grid_edge, random.randint(0.2 * self.map_size, 0.8 * self.map_size)], 
+            [random.randint(0.4 * self.map_size, 0.6 * self.map_size), random.randint(0.4 * grid_num, 0.6 * grid_num)*self.grid_edge] if rn % 2 
+             else [random.randint(0.4 * grid_num, 0.6 * grid_num)*self.grid_edge, random.randint(0.4 * self.map_size, 0.6 * self.map_size)], 
              dtype=np.int32
         )
         rn = random.randint(0, 1)
         self.customer_position = np.array(
-            [random.randint(0.2 * self.map_size, 0.8 * self.map_size), random.randint(0.2 * grid_num, 0.8 * grid_num)*self.grid_edge] if rn % 2 
-             else [random.randint(0.2 * grid_num, 0.8 * grid_num)*self.grid_edge, random.randint(0.2 * self.map_size, 0.8 * self.map_size)], 
+            [random.randint(0.4 * self.map_size, 0.6 * self.map_size), random.randint(0.4 * grid_num, 0.6 * grid_num)*self.grid_edge] if rn % 2 
+             else [random.randint(0.4 * grid_num, 0.6 * grid_num)*self.grid_edge, random.randint(0.4 * self.map_size, 0.6 * self.map_size)], 
              dtype=np.int32
         )
         rn = random.randint(0, 1)
         self.truck_target_position = np.array(
-            [random.randint(0.2 * self.map_size, 0.8 * self.map_size), random.randint(0.2 * grid_num, 0.8 * grid_num)*self.grid_edge] if rn % 2 
-             else [random.randint(0.2 * grid_num, 0.8 * grid_num)*self.grid_edge, random.randint(0.2 * self.map_size, 0.8 * self.map_size)], 
+            [random.randint(0.4 * self.map_size, 0.6 * self.map_size), random.randint(0.4 * grid_num, 0.6 * grid_num)*self.grid_edge] if rn % 2 
+             else [random.randint(0.4 * grid_num, 0.6 * grid_num)*self.grid_edge, random.randint(0.4 * self.map_size, 0.6 * self.map_size)], 
              dtype=np.int32
         )
         
@@ -320,6 +321,12 @@ class UAVTrainingEnvironmentWithObstacle(Env):
             self.uav_target_position = self.truck_position
             target_of_target = self.truck_target_position
         self.uav_position = self.uav_target_position + offset
+        
+        if not (p0 is None):
+            self.customer_position = p0
+            self.uav_target_position = p0
+            target_of_target = p0
+            self.uav_position = np.array([5000, 5000], dtype=np.int32)
 
         # Set the initial power of the uav to the full charge
         self.uav_battery_remaining = self.uav_range
@@ -486,6 +493,17 @@ class UAVTrainingEnvironmentWithObstacle(Env):
             return 0
         
     
+    # when uav collision happens, the action need to rollback
+    def uav_move_rollback(self, action):
+        dist = self.step_len * action[1]
+        # int-ify or not?
+        self.uav_position[0] -= np.cos(action[0]) * dist
+        self.uav_position[1] -= np.sin(action[0]) * dist
+        
+        # update the remaining battery of uav
+        self.uav_battery_remaining += dist
+                
+    
     # Convert the normalized action back to the range of the original action distribution
     def denormalize_action(self, action):
         action[0] = action[0] * np.pi + np.pi
@@ -509,7 +527,7 @@ class UAVTrainingEnvironmentWithObstacle(Env):
         
         self.denormalize_action(action)
         # get -0.1 reward every transitions to encourage faster delivery
-        rewards = REWARD_URGENCY + max((self.uav_velocity / 3) - action[1], 0) * REWARD_SLOW
+        rewards = REWARD_URGENCY + max((self.uav_velocity * 0.4) - action[1], 0) * REWARD_SLOW
         
         # Execute actions
         ####
@@ -518,6 +536,7 @@ class UAVTrainingEnvironmentWithObstacle(Env):
         # - Update agent state (i.e. infos)
         # - Get the rewards including global rewards and returning rewards
         
+        position_before = copy(self.uav_position)
         dist_before = np.sqrt(np.sum(np.square(self.uav_position - self.uav_target_position)))
         # truck moves
         # in the first movement, a refined path needs to be generated.
@@ -529,8 +548,8 @@ class UAVTrainingEnvironmentWithObstacle(Env):
             rn = random.randint(0, 1)
             grid_num = self.map_size / self.grid_edge
             self.truck_target_position = np.array(
-                [random.randint(0.2 * self.map_size, 0.8 * self.map_size), random.randint(0.2 * grid_num, 0.8 * grid_num)*self.grid_edge] if rn % 2 
-                else [random.randint(0.2 * grid_num, 0.8 * grid_num)*self.grid_edge, random.randint(0.2 * self.map_size, 0.8 * self.map_size)] 
+                [random.randint(0.4 * self.map_size, 0.6 * self.map_size), random.randint(0.4 * grid_num, 0.6 * grid_num)*self.grid_edge] if rn % 2 
+                else [random.randint(0.4 * grid_num, 0.6 * grid_num)*self.grid_edge, random.randint(0.4 * self.map_size, 0.6 * self.map_size)] 
             )
 
         terminated = False
@@ -540,10 +559,12 @@ class UAVTrainingEnvironmentWithObstacle(Env):
             terminated = True
         elif uav_moving_result == -1:
             rewards += REWARD_UAV_VIOLATE
-            terminated = True
+            self.uav_position = position_before
+            # terminated = True
         elif uav_moving_result == -2:
             rewards += REWARD_UAV_WRECK
-            terminated = True
+            self.uav_position = position_before
+            # terminated = True
         else:
             dist_diff = dist_before - np.sqrt(np.sum(np.square(self.uav_position - self.uav_target_position)))
             rewards += REWARD_APPROUCHING * dist_diff

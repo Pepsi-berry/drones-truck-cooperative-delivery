@@ -1,15 +1,11 @@
-# import os
+import os
 import numpy as np
 from re import match, findall
 import random
-import time
-# import supersuit as ss
-# from env.delivery_env import DeliveryEnvironment
+from copy import copy
 from env.delivery_env_with_obstacle import DeliveryEnvironmentWithObstacle
-# from stable_baselines3 import PPO
-# from pettingzoo.test import parallel_api_test
-# from pettingzoo.utils import parallel_to_aec
-# from stable_baselines3.common.evaluation import evaluate_policy
+from env.uav_env import UAVTrainingEnvironmentWithObstacle
+from stable_baselines3 import PPO
 from gymnasium.spaces import MultiDiscrete, Dict, MultiBinary, Box
 from pettingzoo.utils.env import ActionType, AgentID, ObsType, ParallelEnv
 
@@ -271,17 +267,18 @@ class upper_solver():
         return actions
 
 # probably we need to implement the marl algorithm by ourselves :(
-class PPO():
-    def __init__(self) -> None:
-        pass
+# class PPO():
+#     def __init__(self) -> None:
+#         pass
 
 if __name__ == "__main__":
     
-    possible_agents = ["truck", 
-                            "uav_0_0", "uav_0_1", 
-                            "uav_1_0", "uav_1_1", 
-                            "uav_1_2", "uav_1_3", 
-                            ]
+    possible_agents = [
+        "truck", 
+        "uav_0_0", "uav_0_1", 
+        "uav_1_0", "uav_1_1", 
+        "uav_1_2", "uav_1_3", 
+    ]
     # uav parameters
     # unit here is m/s
     truck_velocity = 7
@@ -290,12 +287,12 @@ if __name__ == "__main__":
     uav_capacity = np.array([10, 3.6])
     # unit here is m
     uav_range = np.array([10_000, 15_000])
-    uav_obs_range = 151
+    uav_obs_range = 150
     
     num_truck = 1
-    num_uavs = 6
-    num_uavs_0 = 2
-    num_uavs_1 = 4
+    num_uavs = 1
+    num_uavs_0 = 1
+    num_uavs_1 = 0
     
     # parcels parameters
     num_parcels = 20
@@ -311,36 +308,97 @@ if __name__ == "__main__":
     grid_edge = 250 # m as unit here
     
     # obstacle parameters
-    num_uav_obstacle = 20
-    num_no_fly_zone = 8
+    num_uav_obstacle = 1
+    num_no_fly_zone = 1
     
-    env = DeliveryEnvironmentWithObstacle(render_mode="human")
+    env = DeliveryEnvironmentWithObstacle(
+        truck_velocity=truck_velocity, 
+        uav_velocity=uav_velocity, 
+        uav_capacity=uav_capacity, 
+        uav_range=uav_range, 
+        uav_obs_range=uav_obs_range, 
+        num_truck=num_truck, 
+        num_uavs=num_uavs, 
+        num_uavs_0=num_uavs_0, 
+        num_uavs_1=num_uavs_1, 
+        num_parcels=num_parcels, 
+        num_parcels_truck=num_parcels_truck, 
+        num_parcels_uav=num_parcels_uav, 
+        num_uav_obstacle=num_uav_obstacle, 
+        num_no_fly_zone=num_no_fly_zone, 
+        render_mode="human"
+    )
+    model_path = os.path.join("training", "models", "best_model_16M_1024")
+    model = PPO.load(model_path)
     
     observations, infos = env.reset()
     # print(env.parcels_weight)
-    delivery_upper_solver = upper_solver(observations["truck"]["observation"]["pos_obs"], num_customer_both, num_parcels_truck, num_parcels_uav, num_uavs)
+    delivery_upper_solver = upper_solver(observations["truck"]["pos_obs"], num_customer_both, num_parcels_truck, num_parcels_uav, num_uavs)
 
     env.render()
     
     # TA_Scheduling_action_random = delivery_upper_solver.solve(observations["truck"]["observation"], infos, env.num_uavs, env.uav_range)
     # TA_Scheduling_action_greedy = delivery_upper_solver.solve_greedy(observations["truck"]["observation"], infos, env.num_uavs, env.uav_range)
+    # print(env.customer_position_both, env.customer_position_uav)
+    TA_Scheduling_action = delivery_upper_solver.solve_greedy(observations["truck"], infos, uav_range)
+    env.TA_Scheduling(TA_Scheduling_action)
+    observations, rewards, terminations, truncations, infos = env.step({})
+    # print(observations['uav_0_0'])
+    obs0 = copy(observations['uav_0_0'])
+    p0 = env.uav_target_positions[0]
     
-    for i in range(50):
+    for i in range(20):
         # this is where you would insert your policy
-        if infos["truck"] or (i % 6 == 0):
-            TA_Scheduling_action = delivery_upper_solver.solve_greedy(observations["truck"]["observation"], infos, uav_range)
+        if infos["truck"] or (i % 6 == 5):
+            TA_Scheduling_action = delivery_upper_solver.solve_greedy(observations["truck"], infos, uav_range)
+            print(TA_Scheduling_action)
             env.TA_Scheduling(TA_Scheduling_action)
-        
+        # print([
+        #     observations[a]
+        #     for a in observations if match('uav', a)
+        # ])
         actions = {
             # here is situated the policy
-            agent: sample_action(env, observations, agent)
-            for agent in env.agents
+            # agent: sample_action(env, observations, agent)
+            agent: model.predict(observations[agent], deterministic=True)[0]
+            for agent in env.agents if match("uav", agent) and not infos[agent]
         }
+        # print(actions)
         observations, rewards, terminations, truncations, infos = env.step(actions)
         
         env.render()
 
     # print("pass")
     
+    env.close()
+    
+    env = UAVTrainingEnvironmentWithObstacle(num_no_fly_zone=1, num_uav_obstacle=1, render_mode='human')
+    # print(p0)
+    obs, info = env.reset(options=1, p0=p0)
+    obs1 = copy(obs)
+    np.savetxt('surr0.txt', obs0['surroundings'][0])
+    np.savetxt('surr1.txt', obs1['surroundings'][0])
+    print(obs0, obs1)
+    if np.array_equal(obs0['surroundings'][0], obs1['surroundings'][0]):
+        print("despair")
+    # print(obs)
+    # print(env.uav_position, env.truck_position, env.truck_target_position, obs["vecs"])
+    rewards = 0
+    env.render()
+    for _ in range(20):
+    # while True:
+        action, _ = model.predict(obs, deterministic=True)
+        # print("*", action)
+        # action = env.action_space.sample()
+        # print(action)
+        obs, reward, termination, truncation, info = env.step(action)
+        # print(env.uav_position, env.truck_position, env.truck_target_position, obs["vecs"])
+        # print(reward)
+        rewards += reward
+        env.render()
+        if termination or truncation:
+            # print(env.time_step, termination, truncation)
+            break
+            
     env.close()
     

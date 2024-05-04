@@ -7,8 +7,9 @@ from stable_baselines3 import PPO
 # from env.delivery_env_with_obstacle import DeliveryEnvironmentWithObstacle
 from stable_baselines3.common.monitor import Monitor
 from stable_baselines3.common.results_plotter import load_results, ts2xy
-from stable_baselines3.common.callbacks import BaseCallback
-from stable_baselines3.common.env_checker import check_env
+from stable_baselines3.common.callbacks import BaseCallback, EvalCallback
+# from stable_baselines3.common.env_checker import check_env
+from stable_baselines3.common.evaluation import evaluate_policy
 from env.uav_env import UAVTrainingEnvironmentWithObstacle
 from base import CustomFeatureExtractor
 
@@ -61,9 +62,12 @@ def train_uav_policy(total_timesteps=20_000, progress_bar=False):
     monitor_log_dir = os.path.join("training", "logs", "Monitor")
     log_path = os.path.join("training", "logs")
     model_path = os.path.join("training", "models", "model_PPO")
-    env = UAVTrainingEnvironmentWithObstacle(num_uav_obstacle=1, num_no_fly_zone=1, render_mode="human")
+    env = UAVTrainingEnvironmentWithObstacle(num_uav_obstacle=5, num_no_fly_zone=2, truck_velocity=4)
+    # eval_env = UAVTrainingEnvironmentWithObstacle(num_uav_obstacle=5, num_no_fly_zone=2, truck_velocity=4)
+    callback = SaveOnBestTrainingRewardCallback(check_freq=5_000, log_dir=monitor_log_dir, model_dir=os.path.join("training", "models"))
+    # eval_callback = EvalCallback(eval_env, best_model_save_path=os.path.join("training", "models", "best_model"), 
+    #                              eval_freq=1_000, n_eval_episodes=10, deterministic=True, callback_after_eval=callback)
     env = Monitor(env, monitor_log_dir)
-    callback = SaveOnBestTrainingRewardCallback(check_freq=10_000, log_dir=monitor_log_dir, model_dir=os.path.join("training", "models"))
     
     policy_kwargs = dict(
         features_extractor_class=CustomFeatureExtractor, 
@@ -71,21 +75,23 @@ def train_uav_policy(total_timesteps=20_000, progress_bar=False):
     )
     if os.path.exists(model_path + ".zip"):
         print("load model from last training.")
-        model = PPO.load(model_path)
+        custom_objects = {
+                "learning_rate": 0.0002
+            }
+        model = PPO.load(model_path, custom_objects=custom_objects)
         model.set_env(env)
     else:
         print("training new model from scratch.")
-        model = PPO("MultiInputPolicy", env, verbose=1, batch_size=256, tensorboard_log=log_path, policy_kwargs=policy_kwargs)
+        model = PPO("MultiInputPolicy", env, verbose=1, learning_rate=0.0003, batch_size=1024, tensorboard_log=log_path, policy_kwargs=policy_kwargs)
         
     print(f"Starting training on {str(env.metadata['name'])}.")
     model.learn(total_timesteps=total_timesteps, progress_bar=progress_bar, callback=callback)
     model.save(model_path)
     print("Last model has been saved.")
-    # print(model.policy)
     
 
 if __name__ == "__main__":
-    env = UAVTrainingEnvironmentWithObstacle(num_uav_obstacle=1, num_no_fly_zone=1, render_mode="human")
+    env = UAVTrainingEnvironmentWithObstacle(num_uav_obstacle=5, num_no_fly_zone=2, truck_velocity=4, render_mode="human")
     env = Monitor(env, os.path.join("training", "logs", "Monitor"))
     
     # print(env.observation_space.sample()["vecs"])
@@ -111,17 +117,21 @@ if __name__ == "__main__":
     
     # train_uav_policy(5_000_000, True)
     
-    model_path = os.path.join("training", "models", "best_model_0")
+    model_path = os.path.join("training", "models", "best_model_16M_1024")
     model = PPO.load(model_path)
-    obs, info = env.reset(options=1)
+    # print("eval result: ", evaluate_policy(model, env, n_eval_episodes=50, deterministic=True))
+    obs, info = env.reset()
+    # print(obs)
+    # print(env.uav_position, env.truck_position, env.truck_target_position, obs["vecs"])
     rewards = 0
     env.render()
-    for _ in range(20):
+    for _ in range(50):
     # while True:
         action, _ = model.predict(obs, deterministic=True)
         # action = env.action_space.sample()
         # print(action)
         obs, reward, termination, truncation, info = env.step(action)
+        # print(env.uav_position, env.truck_position, env.truck_target_position, obs["vecs"])
         # print(reward)
         rewards += reward
         env.render()

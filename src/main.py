@@ -290,9 +290,9 @@ if __name__ == "__main__":
     uav_obs_range = 150
     
     num_truck = 1
-    num_uavs = 1
-    num_uavs_0 = 1
-    num_uavs_1 = 0
+    num_uavs = 6
+    num_uavs_0 = 2
+    num_uavs_1 = 4
     
     # parcels parameters
     num_parcels = 20
@@ -344,10 +344,10 @@ if __name__ == "__main__":
     env.TA_Scheduling(TA_Scheduling_action)
     observations, rewards, terminations, truncations, infos = env.step({})
     # print(observations['uav_0_0'])
-    obs0 = copy(observations['uav_0_0'])
+    # obs0 = copy(observations['uav_0_0'])
     p0 = env.uav_target_positions[0]
     
-    for i in range(20):
+    for i in range(150):
         # this is where you would insert your policy
         if infos["truck"] or (i % 6 == 5):
             TA_Scheduling_action = delivery_upper_solver.solve_greedy(observations["truck"], infos, uav_range)
@@ -361,7 +361,7 @@ if __name__ == "__main__":
             # here is situated the policy
             # agent: sample_action(env, observations, agent)
             agent: model.predict(observations[agent], deterministic=True)[0]
-            for agent in env.agents if match("uav", agent) and not infos[agent]
+            for agent in env.agents if match("uav", agent) #  and not infos[agent]
         }
         # print(actions)
         observations, rewards, terminations, truncations, infos = env.step(actions)
@@ -372,33 +372,35 @@ if __name__ == "__main__":
     
     env.close()
     
-    env = UAVTrainingEnvironmentWithObstacle(num_no_fly_zone=1, num_uav_obstacle=1, render_mode='human')
-    # print(p0)
-    obs, info = env.reset(options=1, p0=p0)
-    obs1 = copy(obs)
-    np.savetxt('surr0.txt', obs0['surroundings'][0])
-    np.savetxt('surr1.txt', obs1['surroundings'][0])
-    print(obs0, obs1)
-    if np.array_equal(obs0['surroundings'][0], obs1['surroundings'][0]):
-        print("despair")
-    # print(obs)
-    # print(env.uav_position, env.truck_position, env.truck_target_position, obs["vecs"])
-    rewards = 0
-    env.render()
-    for _ in range(20):
-    # while True:
-        action, _ = model.predict(obs, deterministic=True)
-        # print("*", action)
-        # action = env.action_space.sample()
-        # print(action)
-        obs, reward, termination, truncation, info = env.step(action)
-        # print(env.uav_position, env.truck_position, env.truck_target_position, obs["vecs"])
-        # print(reward)
-        rewards += reward
-        env.render()
-        if termination or truncation:
-            # print(env.time_step, termination, truncation)
-            break
+    # env = UAVTrainingEnvironmentWithObstacle(num_no_fly_zone=1, num_uav_obstacle=1, render_mode='human')
+    # # print(p0)
+    # obs, info = env.reset(options=1, p0=p0)
+    # # obs1 = copy(obs)
+    # # np.savetxt('surr0.txt', obs0['surroundings'][0])
+    # # np.savetxt('surr1.txt', obs1['surroundings'][0])
+    # # print(obs0, obs1)
+    # # if not np.array_equal(obs0['surroundings'][0], obs1['surroundings'][0]):
+    # #     print("not despair")
+    # #     # np.savetxt('diff.txt', (~np.equal(obs0['surroundings'], obs1['surroundings'])).astype(int)[0])
+    # #     print(obs0['surroundings'][0][77][77], obs1['surroundings'][0][77][77])
+    # # print(obs)
+    # # print(env.uav_position, env.truck_position, env.truck_target_position, obs["vecs"])
+    # rewards = 0
+    # env.render()
+    # for _ in range(20):
+    # # while True:
+    #     action, _ = model.predict(obs, deterministic=True)
+    #     # print("*", action)
+    #     # action = env.action_space.sample()
+    #     # print(action)
+    #     obs, reward, termination, truncation, info = env.step(action)
+    #     # print(env.uav_position, env.truck_position, env.truck_target_position, obs["vecs"])
+    #     # print(reward)
+    #     rewards += reward
+    #     env.render()
+    #     if termination or truncation:
+    #         # print(env.time_step, termination, truncation)
+    #         break
             
-    env.close()
+    # env.close()
     

@@ -14,7 +14,7 @@ MAX_INT = 2**20
 INVALID_ANGLE = 10
 # When the distance between the returning uav and the truck is less than this threshold, 
 # the return is considered complete.
-DIST_THRESHOLD = 40
+DIST_THRESHOLD = 50
 DIST_RESTRICT_UAV = 20
 DIST_RESTRICT_OBSTACLE = 75
 # rewards in various situations
@@ -87,9 +87,9 @@ class DeliveryEnvironmentWithObstacle(ParallelEnv):
         
         self.possible_agents = ["truck", 
                                 # "upper_solver"
-                                "uav_0_0", # "uav_0_1", 
-                                # "uav_1_0", "uav_1_1", 
-                                # "uav_1_2", "uav_1_3", 
+                                "uav_0_0", "uav_0_1", 
+                                "uav_1_0", "uav_1_1", 
+                                "uav_1_2", "uav_1_3", 
                                 ]
         # uav parameters
         # unit here is m/s
@@ -387,7 +387,8 @@ class DeliveryEnvironmentWithObstacle(ParallelEnv):
         # uav obs
         for uav in self.uav_position:
             if uav[0] < xhi and uav[0] > xlo and uav[1] < yhi and uav[1] > ylo: # to be adding: verify if uav is launching
-                uav_obs[0][int(uav[0] - x_offset)][int(uav[1] - y_offset)] = 1
+                # uav_obs[0][int(uav[0] - x_offset)][int(uav[1] - y_offset)] = 1
+                pass
         
         return uav_obs
     
@@ -409,9 +410,9 @@ class DeliveryEnvironmentWithObstacle(ParallelEnv):
         self.time_step = 0
         # Initially, all UAVs are in state of loaded in truck
         self.agents = ["truck", 
-                       "uav_0_0", # "uav_0_1", 
-                    #    "uav_1_0", "uav_1_1", 
-                    #    "uav_1_2", "uav_1_3", 
+                       "uav_0_0", "uav_0_1", 
+                       "uav_1_0", "uav_1_1", 
+                       "uav_1_2", "uav_1_3", 
                        ]
         self.dead_agent_list = []
         self.uav_stages = np.ones(self.num_uavs) * (-1)
@@ -833,7 +834,7 @@ class DeliveryEnvironmentWithObstacle(ParallelEnv):
                         if self.uav_stages[uav_no] == -1:
                             self.infos[agent] = True
                             # charging after returning completion
-                            self.uav_battery_remaining[uav_no] = self.uav_range[self.get_uav_info[0]]
+                            self.uav_battery_remaining[uav_no] = self.uav_range[self.get_uav_info(agent)[0]]
                             if np.array_equal(self.uav_target_positions[uav_no], self.truck_target_position):
                                 self.infos["truck"] = True
                                 self.truck_path.clear()

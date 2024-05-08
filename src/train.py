@@ -82,7 +82,7 @@ def train_uav_policy(total_timesteps=20_000, progress_bar=False):
         model.set_env(env)
     else:
         print("training new model from scratch.")
-        model = PPO("MultiInputPolicy", env, verbose=1, learning_rate=0.0003, batch_size=1024, tensorboard_log=log_path, policy_kwargs=policy_kwargs)
+        model = PPO("MultiInputPolicy", env, verbose=1, learning_rate=0.0003, batch_size=1024, ent_coef=0.01, tensorboard_log=log_path, policy_kwargs=policy_kwargs)
         
     print(f"Starting training on {str(env.metadata['name'])}.")
     model.learn(total_timesteps=total_timesteps, progress_bar=progress_bar, callback=callback)
@@ -91,7 +91,7 @@ def train_uav_policy(total_timesteps=20_000, progress_bar=False):
     
 
 if __name__ == "__main__":
-    env = UAVTrainingEnvironmentWithObstacle(num_uav_obstacle=5, num_no_fly_zone=2, truck_velocity=4, render_mode="human")
+    env = UAVTrainingEnvironmentWithObstacle(num_uav_obstacle=10, num_no_fly_zone=4, truck_velocity=4, MAX_STEP=800, step_len=2, render_mode="human")
     env = Monitor(env, os.path.join("training", "logs", "Monitor"))
     
     # print(env.observation_space.sample()["vecs"])
@@ -117,10 +117,10 @@ if __name__ == "__main__":
     
     # train_uav_policy(5_000_000, True)
     
-    model_path = os.path.join("training", "models", "best_model_16M_1024")
+    model_path = os.path.join("training", "models", "best_model_12M_3_1024_2")
     model = PPO.load(model_path)
-    # print("eval result: ", evaluate_policy(model, env, n_eval_episodes=50, deterministic=True))
-    obs, info = env.reset()
+    # print("eval result: ", evaluate_policy(model, env, n_eval_episodes=100, deterministic=True))
+    obs, info = env.reset(options=0)
     # print(obs)
     # print(env.uav_position, env.truck_position, env.truck_target_position, obs["vecs"])
     rewards = 0

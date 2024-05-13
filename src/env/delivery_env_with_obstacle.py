@@ -119,8 +119,8 @@ class DeliveryEnvironmentWithObstacle(ParallelEnv):
         self.weight_probabilities = [0.8, 0.1, 0.1]
         
         # map parameters
-        self.map_size = 10_000 # m as unit here
-        self.grid_edge = 250 # m as unit here
+        self.map_size = 5_000 # m as unit here
+        self.grid_edge = 125 # m as unit here
         
         # obstacle parameters
         self.num_uav_obstacle = num_uav_obstacle
@@ -295,9 +295,9 @@ class DeliveryEnvironmentWithObstacle(ParallelEnv):
         #     "center" : center, 
         #     "radius" : radius
         # }
-        upper_left_corner = np.array([random.randint(grid_num / 5, grid_num * 0.8) * self.grid_edge + random.randint(self.grid_edge * 0.2, self.grid_edge * 0.4), 
-                          random.randint(grid_num / 5, grid_num * 0.8) * self.grid_edge + random.randint(self.grid_edge * 0.2, self.grid_edge * 0.4)])
-        obstacle_size = random.randint(self.grid_edge * 0.3, self.grid_edge * 0.5)
+        upper_left_corner = np.array([random.randint(grid_num * 0.2, grid_num * 0.8) * self.grid_edge + random.randint(self.grid_edge * 0.2, self.grid_edge * 0.4), 
+                          random.randint(grid_num * 0.2, grid_num * 0.8) * self.grid_edge + random.randint(self.grid_edge * 0.2, self.grid_edge * 0.4)])
+        obstacle_size = random.randint(int(self.grid_edge * 0.3), int(self.grid_edge * 0.5))
         
         return np.array([upper_left_corner, [obstacle_size, obstacle_size]])
         
@@ -419,23 +419,23 @@ class DeliveryEnvironmentWithObstacle(ParallelEnv):
         # The warehouse is located in the center of the map
         self.warehouse_position = np.array([self.map_size / 2, self.map_size / 2], dtype=np.int32)
         # All customer points are distributed at the edge of the road grid
+        grid_num = self.map_size / self.grid_edge
         self.customer_position_truck = np.array(
-            [[random.randint(0, self.map_size), random.randint(0, 40)*self.grid_edge] if i % 2 
-             else [random.randint(0, 40)*self.grid_edge, random.randint(0, self.map_size)] 
+            [[random.randint(0.3 * self.map_size, 0.7 * self.map_size), random.randint(0.3 * grid_num, 0.7 * grid_num)*self.grid_edge] if i % 2 
+             else [random.randint(0.3 * grid_num, 0.7 * grid_num)*self.grid_edge, random.randint(0.3 * self.map_size, 0.7 * self.map_size)] 
              for i in range(self.num_parcels_truck)], dtype=np.int32
             )
         self.customer_position_uav = np.array(
-            [[random.randint(0, self.map_size), random.randint(0, 40)*self.grid_edge] if i % 2 
-             else [random.randint(0, 40)*self.grid_edge, random.randint(0, self.map_size)] 
+            [[random.randint(0.2 * self.map_size, 0.8 * self.map_size), random.randint(0.2 * grid_num, 0.8 * grid_num)*self.grid_edge] if i % 2 
+             else [random.randint(0.2 * grid_num, 0.8 * grid_num)*self.grid_edge, random.randint(0.2 * self.map_size, 0.8 * self.map_size)] 
              for i in range(self.num_parcels_uav)], dtype=np.int32
             )
         self.customer_position_both = np.array(
-            [[random.randint(0, self.map_size), random.randint(0, 40)*self.grid_edge] if i % 2 
-             else [random.randint(0, 40)*self.grid_edge, random.randint(0, self.map_size)] 
+            [[random.randint(0.2 * self.map_size, 0.8 * self.map_size), random.randint(0.2 * grid_num, 0.8 * grid_num)*self.grid_edge] if i % 2 
+             else [random.randint(0.2 * grid_num, 0.8 * grid_num)*self.grid_edge, random.randint(0.2 * self.map_size, 0.8 * self.map_size)] 
              for i in range(self.num_customer_both)], dtype=np.int32
             )
         
-        grid_num = self.map_size / self.grid_edge
         self.no_fly_zones = np.array([self.generate_no_fly_zone() for _ in range(self.num_no_fly_zone)])
         self.uav_obstacles = [self.generate_uav_obstacle(grid_num) for _ in range(self.num_uav_obstacle)]
         
@@ -807,7 +807,8 @@ class DeliveryEnvironmentWithObstacle(ParallelEnv):
                 if np.count_nonzero(self.action_masks) == 2:
                     rewards["Global"] += REWARD_VICTORY
                     self.infos.pop("truck")
-                    self.agents.remove["truck"]
+                    # self.agents.remove("truck")
+                    self.agents = []
             else:
                 rewards["Global"] += REWARD_DELIVERY                        
                 # else:
@@ -853,79 +854,13 @@ class DeliveryEnvironmentWithObstacle(ParallelEnv):
                     
                 else:
                     self.uav_position[uav_no] = copy(self.truck_position)
-        
-        # for agent in actions:
-        #     if match("carried", agent):
-        #         uav_info = findall(r'\d+', agent)
-        #         uav_info = [int(num) for num in uav_info]
-        #         uav_no = uav_info[0] * self.num_uavs_0 + uav_info[1]
-                
-        #         if actions[agent] != self.num_customer_uav:
-        #             if self.uav_target_dist[uav_no] == MAX_INT:
-        #                 self.update_action_mask(agent, actions[agent])
-                        
-        #             uav_moving_result = self.carried_uav_move(agent, actions[agent])
-        #             if self.uav_battery_remaining[uav_no] <= 0:
-        #                 # that means uav wrecked
-        #                 rewards["Global"] += REWARD_UAV_WRECK
-        #                 self.infos[agent]["IsAlive"] = False
-        #                 self.infos[agent]["IsReady"] = False
-        #                 self.agents.remove(agent)
-        #             elif uav_moving_result:
-        #                 self.infos[agent]["IsAlive"] = False
-        #                 self.infos[agent]["IsReady"] = False
-        #                 self.infos[agent.replace("carried", "returning")]["IsAlive"] = True
-        #                 self.infos[agent.replace("carried", "returning")]["IsReady"] = True
-        #                 self.agents.remove(agent)
-        #                 self.agents.append(agent.replace("carried", "returning"))
-        #                 # calculate reward when arriving to customer
-        #                 rewards["Global"] += REWARD_DELIVERY
-        #             else:
-        #                 # can move upwards to execute with update_action_mask
-        #                 self.infos[agent]["IsReady"] = False 
-        #         # When uav doesn't launching, synchronize the coordinates of uav to truck.
-        #         else:
-        #             self.uav_position[uav_no] = copy(self.truck_position)
-        #             self.infos[agent]["IsReady"] = True # redundant?
-        #     elif match("returning", agent):
-        #         returning_result = self.returning_uav_move(agent, actions[agent])
-                
-        #         uav_info = findall(r'\d+', agent)
-        #         uav_info = [int(num) for num in uav_info]
-        #         uav_no = uav_info[0] * self.num_uavs_0 + uav_info[1]
-        #         if self.uav_battery_remaining[uav_no] <= 0:
-        #             # that means uav wrecked
-        #             rewards["Global"] += REWARD_UAV_WRECK
-        #             self.infos[agent]["IsAlive"] = False
-        #             self.infos[agent]["IsReady"] = False
-        #             self.agents.remove(agent)
-                
-        #         elif returning_result == 1:
-        #             self.infos[agent]["IsAlive"] = False
-        #             self.infos[agent]["IsReady"] = False
-        #             self.infos[agent.replace("returning", "carried")]["IsAlive"] = True
-        #             self.infos[agent.replace("returning", "carried")]["IsReady"] = True
-        #             self.agents.remove(agent)
-        #             self.agents.append(agent.replace("returning", "carried"))
-        #             self.uav_battery_remaining[uav_no] = self.uav_range[uav_info[0]]
-        #             # calculate reward when arriving to customer
-        #             rewards[agent] = 1
-        #         # when the uav return to warehouse directly, 
-        #         # it won't be re-activated as carried_uav
-        #         elif returning_result == -1:
-        #             self.infos[agent]["IsAlive"] = False
-        #             self.infos[agent]["IsReady"] = False
-        #             self.agents.remove(agent)
-        #             rewards[agent] = 1
-        #         else:
-        #             self.infos[agent]["IsReady"] = True # redundant?
-
 
         # Check termination conditions
         ####
         terminations = {a: False for a in self.agents}
         if np.sum(self.uav_stages) == (-1) * self.num_uavs and np.array_equal(self.truck_position, self.warehouse_position) and np.count_nonzero(self.action_masks) == 2:
             terminations = {a: True for a in self.agents}
+            self.agents = []
 
         # Check truncation conditions (overwrites termination conditions)
         ####

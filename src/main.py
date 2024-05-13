@@ -188,7 +188,7 @@ class upper_solver():
         task_dists_order = np.argsort(task_dists)
         # uav_task_dists = task_dists[ -self.customer_pos_uav.shape[0] : ]
         
-        truck_task_dists = task_dists[ : self.num_truck_customer]
+        truck_task_dists = task_dists[ : self.num_truck_customer + self.num_both_customer]
         both_task_dists = task_dists[self.num_truck_customer : self.num_truck_customer + self.num_both_customer]
         uav_task_dists = task_dists[self.num_truck_customer + self.num_both_customer : ]
         
@@ -197,7 +197,7 @@ class upper_solver():
         uav_task_dists_order = np.argsort(uav_task_dists)
         
         truck_task_dists_order = np.concatenate([truck_task_dists_order, 
-                                                 both_task_dists_order + self.num_truck_customer, 
+                                                #  both_task_dists_order + self.num_truck_customer, 
                                                  uav_task_dists_order + self.num_truck_customer + self.num_both_customer])
         uav_task_dists_order = np.concatenate([uav_task_dists_order + self.num_both_customer, 
                                                both_task_dists_order])
@@ -217,9 +217,9 @@ class upper_solver():
         
         # get task queue for uav
         for idx in np.flip(uav_task_dists_order): 
-            if uav_task_dists[idx] < uav_range[0] * 0.3 and uav_action_masks[0][idx]:
+            if uav_task_dists[idx] < uav_range[0] * 0.1 and uav_action_masks[0][idx]:
                 task_uav_0_queue.append(idx)
-            if uav_task_dists[idx] < uav_range[1] * 0.3 and uav_action_masks[1][idx]:
+            if uav_task_dists[idx] < uav_range[1] * 0.1 and uav_action_masks[1][idx]:
                 task_uav_1_queue.append(idx)
         
         # task_uav_0_queue.append(-1)
@@ -279,6 +279,8 @@ if __name__ == "__main__":
         "uav_1_0", "uav_1_1", 
         "uav_1_2", "uav_1_3", 
     ]
+    
+    step_len = 2
     # uav parameters
     # unit here is m/s
     truck_velocity = 7
@@ -312,6 +314,7 @@ if __name__ == "__main__":
     num_no_fly_zone = 1
     
     env = DeliveryEnvironmentWithObstacle(
+        step_len=step_len, 
         truck_velocity=truck_velocity, 
         uav_velocity=uav_velocity, 
         uav_capacity=uav_capacity, 
@@ -328,7 +331,7 @@ if __name__ == "__main__":
         num_no_fly_zone=num_no_fly_zone, 
         render_mode="human"
     )
-    model_path = os.path.join("training", "models", "best_model_16M_1024")
+    model_path = os.path.join("training", "models", "best_model_12M_3_1024_2")
     model = PPO.load(model_path)
     
     observations, infos = env.reset()
@@ -347,11 +350,11 @@ if __name__ == "__main__":
     # obs0 = copy(observations['uav_0_0'])
     p0 = env.uav_target_positions[0]
     
-    for i in range(150):
+    for i in range(800):
         # this is where you would insert your policy
         if infos["truck"] or (i % 6 == 5):
             TA_Scheduling_action = delivery_upper_solver.solve_greedy(observations["truck"], infos, uav_range)
-            print(TA_Scheduling_action)
+            # print(TA_Scheduling_action)
             env.TA_Scheduling(TA_Scheduling_action)
         # print([
         #     observations[a]
@@ -366,41 +369,13 @@ if __name__ == "__main__":
         # print(actions)
         observations, rewards, terminations, truncations, infos = env.step(actions)
         
-        env.render()
+        if not env.agents:
+            print("finish in : ", i)
+            break
+        if i % 3 == 0:
+            env.render()
 
     # print("pass")
     
     env.close()
-    
-    # env = UAVTrainingEnvironmentWithObstacle(num_no_fly_zone=1, num_uav_obstacle=1, render_mode='human')
-    # # print(p0)
-    # obs, info = env.reset(options=1, p0=p0)
-    # # obs1 = copy(obs)
-    # # np.savetxt('surr0.txt', obs0['surroundings'][0])
-    # # np.savetxt('surr1.txt', obs1['surroundings'][0])
-    # # print(obs0, obs1)
-    # # if not np.array_equal(obs0['surroundings'][0], obs1['surroundings'][0]):
-    # #     print("not despair")
-    # #     # np.savetxt('diff.txt', (~np.equal(obs0['surroundings'], obs1['surroundings'])).astype(int)[0])
-    # #     print(obs0['surroundings'][0][77][77], obs1['surroundings'][0][77][77])
-    # # print(obs)
-    # # print(env.uav_position, env.truck_position, env.truck_target_position, obs["vecs"])
-    # rewards = 0
-    # env.render()
-    # for _ in range(20):
-    # # while True:
-    #     action, _ = model.predict(obs, deterministic=True)
-    #     # print("*", action)
-    #     # action = env.action_space.sample()
-    #     # print(action)
-    #     obs, reward, termination, truncation, info = env.step(action)
-    #     # print(env.uav_position, env.truck_position, env.truck_target_position, obs["vecs"])
-    #     # print(reward)
-    #     rewards += reward
-    #     env.render()
-    #     if termination or truncation:
-    #         # print(env.time_step, termination, truncation)
-    #         break
-            
-    # env.close()
     

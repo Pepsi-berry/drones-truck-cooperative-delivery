@@ -5,6 +5,8 @@ from torch import nn
 from stable_baselines3.common.torch_layers import BaseFeaturesExtractor
 from stable_baselines3.common.utils import get_device
 
+# BATCH_SIZE = 1024
+
 class CustomFeatureExtractor(BaseFeaturesExtractor):
     def  __init__(
         self, 
@@ -81,6 +83,21 @@ class CustomFeatureExtractor(BaseFeaturesExtractor):
             nn.Linear(512, 512), 
             nn.ReLU()
         ).to(device)
+        
+        # with th.no_grad():
+        #     print(
+        #         self.extractor_concat(
+        #             th.cat(
+        #                 [extractors["surroundings"](th.as_tensor(observation_space.sample()["surroundings"]).float())] + 
+        #                 [extractors["vecs"](th.as_tensor(observation_space.sample()["vecs"]).unsqueeze(0).float())], dim=1                
+        #             )   
+        #         )
+        #         # extractors["vecs"](th.as_tensor(observation_space.sample()["vecs"]).float()).shape           
+        #     )
+        
+        # self.lstm = nn.LSTM(512, 512, batch_first=True).to(device)
+        # self.h_state = th.zeros(1, 512).to(device)
+        # self.c_state = th.zeros(1, 512).to(device)
 
         # Update the features dim manually
         self._features_dim = total_concat_size
@@ -95,7 +112,12 @@ class CustomFeatureExtractor(BaseFeaturesExtractor):
             # print(key, extractor)
             # print(key, observations[key].shape, extractor)
             encoded_tensor_list.append(extractor(observations[key]))
-            # print(encoded_tensor_list)
+            # print(key, extractor(observations[key]).shape)
         # Return a (B, self._features_dim) PyTorch tensor, where B is batch dimension.
         # print(encoded_tensor_list[0].shape, encoded_tensor_list[1].shape, th.cat(encoded_tensor_list, dim=1).shape)
-        return self.extractor_concat(th.cat(encoded_tensor_list, dim=1))
+        out = self.extractor_concat(th.cat(encoded_tensor_list, dim=1))
+        # out, _ = self.lstm(out, (self.h_state, self.c_state))
+        # print(out.shape)
+        # out = out[-1, :]
+        # print(out.shape)
+        return out

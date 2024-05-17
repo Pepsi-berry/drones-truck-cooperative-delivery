@@ -289,7 +289,7 @@ class UAVTrainingEnvironmentWithObstacle(Env):
         if options is None:
             # self.option = 1 - random.randint(0, 1) * random.randint(0, 1) * random.randint(0, 1)
             # self.option = 1 - int(random.randint(1, 32) / 32)
-            self.option = 0 # + random.randint(0, 1)
+            self.option = 1 # + random.randint(0, 1)
         else:
             self.option = options
         
@@ -315,7 +315,10 @@ class UAVTrainingEnvironmentWithObstacle(Env):
         )
         
         generative_range = 1000 #  + int(1 - random.randint(1, 4) / 4) * 500
-        offset = np.array([random.randint(-1 * generative_range, generative_range), random.randint(-1 * generative_range, generative_range)], dtype=np.int32)
+        generative_lower_bound = 150
+        # offset = np.array([random.randint(-1 * generative_range, generative_range), random.randint(-1 * generative_range, generative_range)], dtype=np.int32)
+        offset = np.array([random.choice([random.randint(-1 * generative_range, -1 * generative_lower_bound), random.randint(generative_lower_bound, generative_range)]), 
+                           random.choice([random.randint(-1 * generative_range, -1 * generative_lower_bound), random.randint(generative_lower_bound, generative_range)])])
         target_of_target = None
         if self.option:
             self.uav_target_position = self.customer_position
@@ -341,7 +344,7 @@ class UAVTrainingEnvironmentWithObstacle(Env):
         
         # rn = random.randint(0, 1)
         # if rn and np.linalg.norm(offset) < 150:
-        # self.uav_obstacles.append(np.array([(self.uav_position + self.uav_target_position) / 2 - 25, [50, 50]]))
+        self.uav_obstacles.append(np.array([(self.uav_position + self.uav_target_position) / 2 - 50, [100, 100]]))
 
         observations = dict({
             "surroundings" : self.get_obs(), 

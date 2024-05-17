@@ -1,11 +1,11 @@
 import os
 import functools
-import random
 from copy import copy
 from re import match, findall
 
 import numpy as np
 from gymnasium.spaces import Box, Discrete, MultiDiscrete, Dict, MultiBinary
+from gymnasium.utils import seeding
 
 from pettingzoo import ParallelEnv
 import pygame
@@ -77,6 +77,7 @@ class DeliveryEnvironmentWithObstacle(ParallelEnv):
         # These attributes should not be changed after initialization except time_step.
         self.render_mode = render_mode
         self.screen = None
+        self.RNG, _ = seeding.np_random()
         if self.render_mode == "human":
             self.clock = pygame.time.Clock()
         
@@ -249,16 +250,16 @@ class DeliveryEnvironmentWithObstacle(ParallelEnv):
         return uav_info + [uav_no]
 
     def generate_weight(self, lower, partition1, partition2, upper):
-        probability = random.random()  # generate a random number between [0, 1)
+        probability = self.RNG.random()  # generate a random number between [0, 1)
         if probability < 0.8:
             # 0.8：<= 3.6kg
-            return random.uniform(lower, partition1)
+            return self.RNG.uniform(lower, partition1)
         elif probability < 0.9:
             # 0.1：3.6kg - 10kg
-            return random.uniform(partition1, partition2)
+            return self.RNG.uniform(partition1, partition2)
         else:
             # 0.1：>= 10kg
-            return random.uniform(partition2, upper)
+            return self.RNG.uniform(partition2, upper)
 
     # It is necessary to ensure that the no-fly zone does not contain warehouse and 
     # any customer points that only support delivery by uav.
@@ -271,10 +272,10 @@ class DeliveryEnvironmentWithObstacle(ParallelEnv):
         # return np.array([self.warehouse_position - np.array([self.grid_edge, self.grid_edge]), np.array([self.grid_edge * 2, self.grid_edge])])
         while True:
             not_suitable = False
-            upper_left_corner = np.array([random.randint(self.grid_edge, self.map_size - 4 * self.grid_edge),
-                                        random.randint(self.grid_edge, self.map_size - 4 * self.grid_edge)])
-            range_size = np.array([random.randrange(self.grid_edge, 3 * self.grid_edge, step=5), 
-                                random.randrange(self.grid_edge, 3 * self.grid_edge, step=5)])
+            upper_left_corner = np.array([self.RNG.integers(self.grid_edge, self.map_size - 4 * self.grid_edge, endpoint=True),
+                                        self.RNG.integers(self.grid_edge, self.map_size - 4 * self.grid_edge, endpoint=True)])
+            range_size = np.array([self.RNG.integers(self.grid_edge, 3 * self.grid_edge), 
+                                self.RNG.integers(self.grid_edge, 3 * self.grid_edge)])
             lower_right_corner = upper_left_corner + range_size
             for customer in self.customer_position_uav:
                 if customer[0] > upper_left_corner[0] and customer[0] < lower_right_corner[0] and customer[1] > upper_left_corner[1] and customer[1] < lower_right_corner[1]:
@@ -288,16 +289,9 @@ class DeliveryEnvironmentWithObstacle(ParallelEnv):
     
     # Obstacles need to be situated inside the road grid and preferably should not intersect with the road
     def generate_uav_obstacle(self, grid_num):
-        # center = np.array([random.randint(grid_num / 5, grid_num * 0.8) * self.grid_edge + random.randint(self.grid_edge * 0.3, self.grid_edge * 0.7), 
-        #                   random.randint(grid_num / 5, grid_num * 0.8) * self.grid_edge + random.randint(self.grid_edge * 0.3, self.grid_edge * 0.7)])
-        # radius = random.randint(self.grid_edge * 0.2, self.grid_edge * 0.3)
-        # return {
-        #     "center" : center, 
-        #     "radius" : radius
-        # }
-        upper_left_corner = np.array([random.randint(grid_num * 0.2, grid_num * 0.8) * self.grid_edge + random.randint(self.grid_edge * 0.2, self.grid_edge * 0.4), 
-                          random.randint(grid_num * 0.2, grid_num * 0.8) * self.grid_edge + random.randint(self.grid_edge * 0.2, self.grid_edge * 0.4)])
-        obstacle_size = random.randint(int(self.grid_edge * 0.3), int(self.grid_edge * 0.5))
+        upper_left_corner = np.array([self.RNG.integers(grid_num * 0.2, grid_num * 0.8) * self.grid_edge + self.RNG.integers(self.grid_edge * 0.2, self.grid_edge * 0.4), 
+                          self.RNG.integers(grid_num * 0.2, grid_num * 0.8) * self.grid_edge + self.RNG.integers(self.grid_edge * 0.2, self.grid_edge * 0.4)])
+        obstacle_size = self.RNG.integers(int(self.grid_edge * 0.3), int(self.grid_edge * 0.5))
         
         return np.array([upper_left_corner, [obstacle_size, obstacle_size]])
         
@@ -406,6 +400,9 @@ class DeliveryEnvironmentWithObstacle(ParallelEnv):
 
         And must set up the environment so that render(), step(), and observe() can be called without issues.
         """
+        # re-seed the RNG
+        if seed is not None:
+            self.RNG, _ = seeding.np_random(seed)
         # set the time step to 0 initially
         self.time_step = 0
         # Initially, all UAVs are in state of loaded in truck
@@ -421,18 +418,18 @@ class DeliveryEnvironmentWithObstacle(ParallelEnv):
         # All customer points are distributed at the edge of the road grid
         grid_num = self.map_size / self.grid_edge
         self.customer_position_truck = np.array(
-            [[random.randint(0.3 * self.map_size, 0.7 * self.map_size), random.randint(0.3 * grid_num, 0.7 * grid_num)*self.grid_edge] if i % 2 
-             else [random.randint(0.3 * grid_num, 0.7 * grid_num)*self.grid_edge, random.randint(0.3 * self.map_size, 0.7 * self.map_size)] 
+            [[self.RNG.integers(0.3 * self.map_size, 0.7 * self.map_size), self.RNG.integers(0.3 * grid_num, 0.7 * grid_num)*self.grid_edge] if i % 2 
+             else [self.RNG.integers(0.3 * grid_num, 0.7 * grid_num)*self.grid_edge, self.RNG.integers(0.3 * self.map_size, 0.7 * self.map_size)] 
              for i in range(self.num_parcels_truck)], dtype=np.int32
             )
         self.customer_position_uav = np.array(
-            [[random.randint(0.2 * self.map_size, 0.8 * self.map_size), random.randint(0.2 * grid_num, 0.8 * grid_num)*self.grid_edge] if i % 2 
-             else [random.randint(0.2 * grid_num, 0.8 * grid_num)*self.grid_edge, random.randint(0.2 * self.map_size, 0.8 * self.map_size)] 
+            [[self.RNG.integers(0.2 * self.map_size, 0.8 * self.map_size), self.RNG.integers(0.2 * grid_num, 0.8 * grid_num)*self.grid_edge] if i % 2 
+             else [self.RNG.integers(0.2 * grid_num, 0.8 * grid_num)*self.grid_edge, self.RNG.integers(0.2 * self.map_size, 0.8 * self.map_size)] 
              for i in range(self.num_parcels_uav)], dtype=np.int32
             )
         self.customer_position_both = np.array(
-            [[random.randint(0.2 * self.map_size, 0.8 * self.map_size), random.randint(0.2 * grid_num, 0.8 * grid_num)*self.grid_edge] if i % 2 
-             else [random.randint(0.2 * grid_num, 0.8 * grid_num)*self.grid_edge, random.randint(0.2 * self.map_size, 0.8 * self.map_size)] 
+            [[self.RNG.integers(0.2 * self.map_size, 0.8 * self.map_size), self.RNG.integers(0.2 * grid_num, 0.8 * grid_num)*self.grid_edge] if i % 2 
+             else [self.RNG.integers(0.2 * grid_num, 0.8 * grid_num)*self.grid_edge, self.RNG.integers(0.2 * self.map_size, 0.8 * self.map_size)] 
              for i in range(self.num_customer_both)], dtype=np.int32
             )
         

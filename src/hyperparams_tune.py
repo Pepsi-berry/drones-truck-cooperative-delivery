@@ -9,14 +9,15 @@ from stable_baselines3 import PPO
 from stable_baselines3.common.callbacks import EvalCallback
 from stable_baselines3.common.monitor import Monitor
 from env.uav_env import UAVTrainingEnvironmentWithObstacle
+from base import CustomFeatureExtractor
 import torch
 import torch.nn as nn
 
 
-N_TRIALS = 100
+N_TRIALS = 2
 N_STARTUP_TRIALS = 5
-N_EVALUATIONS = 10
-N_TIMESTEPS = int(1e6)
+N_EVALUATIONS = 2
+N_TIMESTEPS = int(1e3)
 EVAL_FREQ = int(N_TIMESTEPS / N_EVALUATIONS)
 N_EVAL_EPISODES = 3
 
@@ -92,7 +93,7 @@ def sample_a2c_params(trial: optuna.Trial, n_actions: int, n_envs: int, addition
     }
 
 
-def sample_ppo_params(trial: optuna.Trial, n_actions: int, n_envs: int, additional_args: dict) -> Dict[str, Any]:
+def sample_ppo_params(trial: optuna.Trial) -> Dict[str, Any]:
     """
     Sampler for PPO hyperparams.
 
@@ -102,7 +103,7 @@ def sample_ppo_params(trial: optuna.Trial, n_actions: int, n_envs: int, addition
     batch_size = trial.suggest_categorical("batch_size", [8, 16, 32, 64, 128, 256, 512])
     n_steps = trial.suggest_categorical("n_steps", [8, 16, 32, 64, 128, 256, 512, 1024, 2048])
     gamma = trial.suggest_categorical("gamma", [0.9, 0.95, 0.98, 0.99, 0.995, 0.999, 0.9999])
-    learning_rate = trial.suggest_float("learning_rate", 1e-5, 1, log=True)
+    learning_rate = trial.suggest_float("learning_rate", 1e-5, 1e-2, log=True)
     ent_coef = trial.suggest_float("ent_coef", 0.00000001, 0.1, log=True)
     clip_range = trial.suggest_categorical("clip_range", [0.1, 0.2, 0.3, 0.4])
     n_epochs = trial.suggest_categorical("n_epochs", [1, 5, 10, 20])
@@ -164,6 +165,7 @@ def sample_ppo_params(trial: optuna.Trial, n_actions: int, n_envs: int, addition
             net_arch=net_arch,
             activation_fn=activation_fn,
             ortho_init=ortho_init,
+            features_extractor_class=CustomFeatureExtractor
         ),
     }
     

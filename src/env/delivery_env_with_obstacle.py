@@ -85,13 +85,9 @@ class DeliveryEnvironmentWithObstacle(ParallelEnv):
         self.MAX_STEP = MAX_STEP
         self.step_len = step_len
         self.time_step = 0
+        # independent-truck mode off initially
+        self.mode = 0
         
-        self.possible_agents = ["truck", 
-                                # "upper_solver"
-                                "uav_0_0", "uav_0_1", 
-                                "uav_1_0", "uav_1_1", 
-                                "uav_1_2", "uav_1_3", 
-                                ]
         # uav parameters
         # unit here is m/s
         self.truck_velocity = truck_velocity
@@ -126,6 +122,15 @@ class DeliveryEnvironmentWithObstacle(ParallelEnv):
         # obstacle parameters
         self.num_uav_obstacle = num_uav_obstacle
         self.num_no_fly_zone = num_no_fly_zone
+        
+        # self.possible_agents = ["truck", 
+        #                         # "upper_solver"
+        #                         "uav_0_0", "uav_0_1", 
+        #                         "uav_1_0", "uav_1_1", 
+        #                         # "uav_1_2", "uav_1_3", 
+        #                         ]
+        
+        self.possible_agents = ["truck"] + ["uav_0_" + str(i) for i in range(self.num_uavs_0)] + ["uav_1_" + str(i) for i in range(self.num_uavs_1)]
         
         self.uav_name_mapping = dict(zip([agent for agent in self.possible_agents if match("uav", agent)],
                                          list(range(self.num_uavs))))
@@ -403,14 +408,19 @@ class DeliveryEnvironmentWithObstacle(ParallelEnv):
         # re-seed the RNG
         if seed is not None:
             self.RNG, _ = seeding.np_random(seed)
+        # set the independent-truck mode on or off
+        # 0 means off, 1 means on
+        if options is not None:
+            self.mode = options
         # set the time step to 0 initially
         self.time_step = 0
         # Initially, all UAVs are in state of loaded in truck
-        self.agents = ["truck", 
-                       "uav_0_0", "uav_0_1", 
-                       "uav_1_0", "uav_1_1", 
-                       "uav_1_2", "uav_1_3", 
-                       ]
+        # self.agents = ["truck", 
+        #                "uav_0_0", "uav_0_1", 
+        #                "uav_1_0", "uav_1_1", 
+        #             #    "uav_1_2", "uav_1_3", 
+        #                ]
+        self.agents = self.possible_agents.copy()
         self.dead_agent_list = []
         self.uav_stages = np.ones(self.num_uavs) * (-1)
         # The warehouse is located in the center of the map
@@ -448,7 +458,7 @@ class DeliveryEnvironmentWithObstacle(ParallelEnv):
         # to customer_both —— to customer_uav
         #      10 here     ——      6 here    
         self.parcels_weight = np.array([
-            self.generate_weight(0, 3.6, 10, 50) if idx < self.num_customer_both
+            self.generate_weight(0, 3.6, 6, 10) if idx < self.num_customer_both
             else self.generate_weight(0, 3.6, 6, 10) # to make sure all the uav parcel can be delivered
             for idx in range(self.num_customer_uav)
             ])
@@ -554,7 +564,7 @@ class DeliveryEnvironmentWithObstacle(ParallelEnv):
                     self.truck_masks[action] = 0
                 elif self.num_parcels_truck < action <= self.num_customer_truck:
                     self.truck_target_position = copy(self.customer_position_both[action - self.num_parcels_truck - 1])
-                    self.truck_masks[action] = 0
+                    # self.truck_masks[action] = 0
                 else:
                     self.truck_target_position = copy(self.customer_position_uav[action - self.num_customer_truck - 1])
             elif match("uav", agent):
@@ -798,6 +808,16 @@ class DeliveryEnvironmentWithObstacle(ParallelEnv):
             self.genarate_truck_path(self.truck_target_position)
             # self.update_action_mask(agent, self.truck_target_position)
         if actions and self.truck_move():
+            # Due to the design in TA_Scheduling, the truck may not modify the action_mask  when TA
+            # so the modify operation is supplemented when the delivery is completed.
+            idx = np.where((self.customer_position_both == self.truck_target_position).all(axis=1))[0]
+            if idx.size:
+                self.truck_masks[idx[0] + self.num_parcels_truck + 1] = 0
+            if self.mode:
+                # truck can delivery all kind of parcels when the independent-truck mode on
+                idx = np.where((self.customer_position_uav == self.truck_target_position).all(axis=1))[0]
+                if idx.size:
+                    self.uav_masks[idx[0] + self.num_customer_both] = 0
             self.infos["truck"] = True
             # calculate reward when arriving to target
             if np.array_equal(self.truck_position, self.warehouse_position):

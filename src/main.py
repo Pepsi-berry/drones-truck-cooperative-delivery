@@ -6,7 +6,6 @@ from itertools import combinations
 from env.delivery_env_with_obstacle import DeliveryEnvironmentWithObstacle
 from env.uav_env import UAVTrainingEnvironmentWithObstacle
 from stable_baselines3 import PPO
-from gymnasium.spaces import MultiDiscrete, Dict, MultiBinary, Box
 from pettingzoo.utils.env import ActionType, AgentID, ObsType, ParallelEnv
 from tsp_solver import solve_tsp
 
@@ -296,7 +295,7 @@ def reshape_tsp_route(route):
         return route  # return original list if there is no 0 there (or throw an error?)
 
     zero_index = route.index(0)  # find the index of 0 in list
-    return route[zero_index:] + route[:zero_index]  # reshape
+    return route[zero_index + 1:] + route[:zero_index + 1]  # reshape
 
 if __name__ == "__main__":
     
@@ -321,9 +320,9 @@ if __name__ == "__main__":
     uav_obs_range = 150
     
     num_truck = 1
-    num_uavs = 6
-    num_uavs_0 = 2
-    num_uavs_1 = 4
+    num_uavs_0 = 1
+    num_uavs_1 = 1
+    num_uavs = num_uavs_0 + num_uavs_1
     
     # parcels parameters
     num_parcels = 20
@@ -363,67 +362,71 @@ if __name__ == "__main__":
     model_path = os.path.join("training", "models", "best_model_12M_3_1024_2")
     model = PPO.load(model_path)
     
-    for i in range(5):
-        seed = random.randint(1, 114_514)
-        print(seed)
-        # observations, infos = env.reset(seed=seed)
-        # delivery_upper_solver = upper_solver(observations["truck"]["pos_obs"], num_customer_both, num_parcels_truck, num_parcels_uav, num_uavs)
-        # route, _ = delivery_upper_solver.solve_TSP()
-        # route = reshape_tsp_route(route)
-        
-        # print(route)
-        # for i in range(10_000):
-        #     # this is where you would insert your upper policy
-        #     if infos["truck"] or (i % 6 == 5):
-        #         TA_Scheduling_action = delivery_upper_solver.solve_greedy(observations["truck"], infos, uav_range)
-        #         env.TA_Scheduling(TA_Scheduling_action)
-
-        #     actions = {
-        #         # here is situated the lower policy
-        #         agent: model.predict(observations[agent], deterministic=True)[0]
-        #         for agent in env.agents if match("uav", agent) #  and not infos[agent]
-        #     }
-        #     observations, rewards, terminations, truncations, infos = env.step(actions)
-            
-        #     if not env.agents:
-        #         print("finish in : ", i)
-        #         break
-        #     if i % 5 == 0:
-        #         env.render()
-        
-        
-        observations, infos = env.reset(seed=seed)
-        delivery_upper_solver = upper_solver(observations["truck"]["pos_obs"], num_customer_both, num_parcels_truck, num_parcels_uav, num_uavs)
-        # env.render()
-
-        TA_Scheduling_action = delivery_upper_solver.solve_greedy(observations["truck"], infos, uav_range)
-        env.TA_Scheduling(TA_Scheduling_action)
-        observations, rewards, terminations, truncations, infos = env.step({})
-        
-        for i in range(2000):
-            # this is where you would insert your policy
-            if infos["truck"] or (i % 6 == 5):
-                TA_Scheduling_action = delivery_upper_solver.solve_greedy(observations["truck"], infos, uav_range)
-                # print(TA_Scheduling_action)
-                env.TA_Scheduling(TA_Scheduling_action)
-            # print([
-            #     observations[a]
-            #     for a in observations if match('uav', a)
-            # ])
-            actions = {
-                # here is situated the policy
-                # agent: sample_action(env, observations, agent)
-                agent: model.predict(observations[agent], deterministic=True)[0]
-                for agent in env.agents if match("uav", agent) #  and not infos[agent]
+    # randList = [99112, 39566, 26912, 97613, 100615, 91316, 91792, 50701, 83019, 112200, 47254, 78875, 38088, 21103, 44819]
+    # for i in range(10):
+    # 47899, 108221, 103327, 12512
+    seed = 103327 # random.randint(1, 114_514)
+    print(seed)
+    observations, infos = env.reset(seed=seed, options=1)
+    delivery_upper_solver = upper_solver(observations["truck"]["pos_obs"], num_customer_both, num_parcels_truck, num_parcels_uav, num_uavs)
+    route, _ = delivery_upper_solver.solve_TSP()
+    route = reshape_tsp_route(route)
+    
+    route.reverse()
+    for i in range(3_000):
+        # this is where you would insert your upper policy
+        if infos["truck"]:
+            schedule_actions = {
+                'truck': route.pop()
             }
-            # print(actions)
-            observations, rewards, terminations, truncations, infos = env.step(actions)
             
-            if not env.agents:
-                print("finish in : ", i)
-                break
-            # if i % 4 == 0:
-            #     env.render()
+        env.TA_Scheduling(schedule_actions)
+        # actions = {
+        #     # here is situated the lower policy
+        #     agent: model.predict(observations[agent], deterministic=True)[0]
+        #     for agent in env.agents if match("uav", agent) #  and not infos[agent]
+        # }
+        observations, rewards, terminations, truncations, infos = env.step({'truck':None})
+        
+        if not env.agents:
+            print("finish in : ", i)
+            break
+        # if i % 15 == 0:
+        #     env.render()
+    
+    
+    observations, infos = env.reset(seed=seed)
+    delivery_upper_solver = upper_solver(observations["truck"]["pos_obs"], num_customer_both, num_parcels_truck, num_parcels_uav, num_uavs)
+    # env.render()
+
+    TA_Scheduling_action = delivery_upper_solver.solve_greedy(observations["truck"], infos, uav_range)
+    env.TA_Scheduling(TA_Scheduling_action)
+    observations, rewards, terminations, truncations, infos = env.step({})
+    
+    for i in range(1500):
+        # this is where you would insert your policy
+        if infos["truck"] or (i % 6 == 5):
+            TA_Scheduling_action = delivery_upper_solver.solve_greedy(observations["truck"], infos, uav_range)
+            # print(TA_Scheduling_action)
+            env.TA_Scheduling(TA_Scheduling_action)
+        # print([
+        #     observations[a]
+        #     for a in observations if match('uav', a)
+        # ])
+        actions = {
+            # here is situated the policy
+            # agent: sample_action(env, observations, agent)
+            agent: model.predict(observations[agent], deterministic=True)[0]
+            for agent in env.agents if match("uav", agent) #  and not infos[agent]
+        }
+        # print(actions)
+        observations, rewards, terminations, truncations, infos = env.step(actions)
+        
+        if not env.agents:
+            print("finish in : ", i)
+            break
+        if i % 5 == 0:
+            env.render()
 
     # print("pass")
     

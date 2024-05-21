@@ -95,7 +95,7 @@ def train_uav_policy(total_timesteps=20_000, progress_bar=False):
     
 
 if __name__ == "__main__":
-    env = UAVTrainingEnvironmentWithObstacle(num_uav_obstacle=25, num_no_fly_zone=4, truck_velocity=4, MAX_STEP=800, step_len=2, render_mode="human")
+    env = UAVTrainingEnvironmentWithObstacle(num_uav_obstacle=20, num_no_fly_zone=4, truck_velocity=4, MAX_STEP=800, step_len=2, render_mode="human")
     # env = UAVEvalEnvironmentWithObstacle(num_uav_obstacle=10, num_no_fly_zone=4, truck_velocity=4, MAX_STEP=800, step_len=2, render_mode="human")
     env = Monitor(env, os.path.join("training", "logs", "Monitor"))
     
@@ -122,15 +122,15 @@ if __name__ == "__main__":
     
     # train_uav_policy(1_000, True)
     
-    model_path = os.path.join("training", "models", "best_model_SAC_1M_1")
+    model_path = os.path.join("training", "models", "best_model_SAC_600K_0")
     model = SAC.load(model_path)
     # print("eval result: ", evaluate_policy(model, env, n_eval_episodes=10, deterministic=True))
-    obs, info = env.reset(options=1)
+    obs, info = env.reset(options=0)
     # print(obs)
     # print(env.uav_position, env.truck_position, env.truck_target_position, obs["vecs"])
     rewards = 0
     env.render()
-    for _ in range(50):
+    for _ in range(100):
     # while True:
         action, _ = model.predict(obs, deterministic=True)
         # action = env.action_space.sample()

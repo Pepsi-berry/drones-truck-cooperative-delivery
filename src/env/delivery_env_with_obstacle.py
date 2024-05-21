@@ -556,17 +556,27 @@ class DeliveryEnvironmentWithObstacle(ParallelEnv):
         for agent in actions:
             action = actions[agent]
             if match("truck", agent):
-                self.infos[agent] = False
-                if action == 0:
-                    self.truck_target_position = copy(self.warehouse_position)
-                elif 0 < action <= self.num_parcels_truck:
-                    self.truck_target_position = copy(self.customer_position_truck[action - 1])
-                    self.truck_masks[action] = 0
-                elif self.num_parcels_truck < action <= self.num_customer_truck:
-                    self.truck_target_position = copy(self.customer_position_both[action - self.num_parcels_truck - 1])
-                    # self.truck_masks[action] = 0
-                else:
-                    self.truck_target_position = copy(self.customer_position_uav[action - self.num_customer_truck - 1])
+                if isinstance(action, int):
+                    self.infos[agent] = False
+                    if action == 0:
+                        self.truck_target_position = copy(self.warehouse_position)
+                    elif 0 < action <= self.num_parcels_truck:
+                        self.truck_target_position = copy(self.customer_position_truck[action - 1])
+                        self.truck_masks[action] = 0
+                    elif self.num_parcels_truck < action <= self.num_customer_truck:
+                        self.truck_target_position = copy(self.customer_position_both[action - self.num_parcels_truck - 1])
+                        # self.truck_masks[action] = 0
+                    else:
+                        self.truck_target_position = copy(self.customer_position_uav[action - self.num_customer_truck - 1])
+                elif isinstance(action, np.ndarray):
+                    self.infos[agent] = False
+                    idx = np.where((self.customer_position_truck == action).all(axis=1))[0]
+                    if idx.size > 0:
+                        self.truck_target_position = copy(action) # action = self.customer_position_truck[idx[0]]
+                        self.truck_masks[idx + 1] = 0
+                    else:
+                        self.truck_target_position = copy(action)
+                    
             elif match("uav", agent):
                 uav_no = self.uav_name_mapping[agent]
                 if self.uav_stages[uav_no] == -1 and action != -1:

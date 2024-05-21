@@ -344,7 +344,7 @@ class UAVTrainingEnvironmentWithObstacle(Env):
         
         # rn = random.randint(0, 1)
         # if rn and np.linalg.norm(offset) < 150:
-        self.uav_obstacles.append(np.array([(self.uav_position + self.uav_target_position) / 2 - 50, [100, 100]]))
+        # self.uav_obstacles.append(np.array([(self.uav_position + self.uav_target_position) / 2 - 50, [100, 100]]))
 
         observations = dict({
             "surroundings" : self.get_obs(), 

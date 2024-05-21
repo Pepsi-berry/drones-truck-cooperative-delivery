@@ -4,10 +4,12 @@ from re import match, findall
 import random
 from itertools import combinations
 from env.delivery_env_with_obstacle import DeliveryEnvironmentWithObstacle
-from env.uav_env import UAVTrainingEnvironmentWithObstacle
+# from env.uav_env import UAVTrainingEnvironmentWithObstacle
 from stable_baselines3 import PPO
 from pettingzoo.utils.env import ActionType, AgentID, ObsType, ParallelEnv
 from tsp_solver import solve_tsp
+from customer_clustering_solver import solve_drones_truck_with_parking
+import matplotlib.pyplot as plt
 
 MAX_INT = 100
 
@@ -24,12 +26,14 @@ def sample_action(
         return random.choice(legal_actions)
     return env.action_space(agent).sample()
 
+
 def get_uav_info(uav):
     # get the uav info: kind and no.
     uav_info = findall(r'\d+', uav)
     uav_info = [int(num) for num in uav_info]
     uav_no = uav_info[0] * 2 + uav_info[1]
     return uav_info + [uav_no]
+
 
 def zones_intersection(zone, xlo , xhi, ylo, yhi):
     lower_left = zone[0]
@@ -44,6 +48,15 @@ def zones_intersection(zone, xlo , xhi, ylo, yhi):
             max(ylo, lower_left[1]), 
             min(yhi, upper_right[1])])
         
+
+def reshape_tsp_route(route):
+    if 0 not in route:
+        return route  # return original list if there is no 0 there (or throw an error?)
+
+    zero_index = route.index(0)  # find the index of 0 in list
+    return route[zero_index + 1:] + route[:zero_index + 1]  # reshape
+
+
 class upper_solver():
     def __init__(self, pos_obs, 
                  num_both_customer=10, 
@@ -284,18 +297,31 @@ class upper_solver():
         print(f"Optimal cost: {cost:g}")
         print("")
         return tour, cost
+    
+    
+    def solve_parking(self, grid_size):
+        _, clusters, centroids = solve_drones_truck_with_parking(self.customer_pos_truck, self.customer_pos_truck[:self.num_truck_customer], grid_size=grid_size)
+        clusters.insert(0, []) # insert [] as the first element represent warehouse node include no customer point
+        num_nodes = centroids.shape[0] + 1
+        points = np.concatenate([[self.warehouse_pos], centroids])
+        nodes = list(range(num_nodes))
+        distances = {
+            (i, j): (sum(abs(points[i][k] - points[j][k]) for k in range(2)))
+            for i, j in combinations(nodes, 2)
+        }
+        
+        route, _ = solve_tsp(nodes, distances)
+        route = reshape_tsp_route(route)
+        route.reverse()
+                
+        return route, clusters, points
+    
 
 # probably we need to implement the marl algorithm by ourselves :(
 # class PPO():
 #     def __init__(self) -> None:
 #         pass
 
-def reshape_tsp_route(route):
-    if 0 not in route:
-        return route  # return original list if there is no 0 there (or throw an error?)
-
-    zero_index = route.index(0)  # find the index of 0 in list
-    return route[zero_index + 1:] + route[:zero_index + 1]  # reshape
 
 if __name__ == "__main__":
     
@@ -335,7 +361,7 @@ if __name__ == "__main__":
     
     # map parameters
     map_size = 10_000 # m as unit here
-    grid_edge = 250 # m as unit here
+    grid_edge = 125 # m as unit here
     
     # obstacle parameters
     num_uav_obstacle = 1
@@ -365,70 +391,136 @@ if __name__ == "__main__":
     # randList = [99112, 39566, 26912, 97613, 100615, 91316, 91792, 50701, 83019, 112200, 47254, 78875, 38088, 21103, 44819]
     # for i in range(10):
     # 47899, 108221, 103327, 12512
-    seed = 103327 # random.randint(1, 114_514)
+    seed = 65758 # random.randint(1, 114_514)
     print(seed)
-    observations, infos = env.reset(seed=seed, options=1)
-    delivery_upper_solver = upper_solver(observations["truck"]["pos_obs"], num_customer_both, num_parcels_truck, num_parcels_uav, num_uavs)
-    route, _ = delivery_upper_solver.solve_TSP()
-    route = reshape_tsp_route(route)
+    # observations, infos = env.reset(seed=seed, options=1)
+    # delivery_upper_solver = upper_solver(observations["truck"]["pos_obs"], num_customer_both, num_parcels_truck, num_parcels_uav, num_uavs)
+    # route, _ = delivery_upper_solver.solve_TSP()
+    # route = reshape_tsp_route(route)
     
-    route.reverse()
-    for i in range(3_000):
-        # this is where you would insert your upper policy
-        if infos["truck"]:
-            schedule_actions = {
-                'truck': route.pop()
-            }
+    # route.reverse()
+    # for i in range(3_000):
+    #     # this is where you would insert your upper policy
+    #     if infos["truck"]:
+    #         schedule_actions = {
+    #             'truck': route.pop()
+    #         }
             
-        env.TA_Scheduling(schedule_actions)
-        # actions = {
-        #     # here is situated the lower policy
-        #     agent: model.predict(observations[agent], deterministic=True)[0]
-        #     for agent in env.agents if match("uav", agent) #  and not infos[agent]
-        # }
-        observations, rewards, terminations, truncations, infos = env.step({'truck':None})
+    #     env.TA_Scheduling(schedule_actions)
+    #     # actions = {
+    #     #     # here is situated the lower policy
+    #     #     agent: model.predict(observations[agent], deterministic=True)[0]
+    #     #     for agent in env.agents if match("uav", agent) #  and not infos[agent]
+    #     # }
+    #     observations, rewards, terminations, truncations, infos = env.step({'truck':None})
         
-        if not env.agents:
-            print("finish in : ", i)
-            break
-        # if i % 15 == 0:
-        #     env.render()
+    #     if not env.agents:
+    #         print("finish in : ", i)
+    #         break
+    #     # if i % 15 == 0:
+    #     #     env.render()
     
+    
+    # observations, infos = env.reset(seed=seed)
+    # delivery_upper_solver = upper_solver(observations["truck"]["pos_obs"], num_customer_both, num_parcels_truck, num_parcels_uav, num_uavs)
+    # # env.render()
+
+    # TA_Scheduling_action = delivery_upper_solver.solve_greedy(observations["truck"], infos, uav_range)
+    # env.TA_Scheduling(TA_Scheduling_action)
+    # observations, rewards, terminations, truncations, infos = env.step({})
+    
+    # for i in range(1500):
+    #     # this is where you would insert your policy
+    #     if infos["truck"] or (i % 6 == 5):
+    #         TA_Scheduling_action = delivery_upper_solver.solve_greedy(observations["truck"], infos, uav_range)
+    #         # print(TA_Scheduling_action)
+    #         env.TA_Scheduling(TA_Scheduling_action)
+    #     # print([
+    #     #     observations[a]
+    #     #     for a in observations if match('uav', a)
+    #     # ])
+    #     actions = {
+    #         # here is situated the policy
+    #         # agent: sample_action(env, observations, agent)
+    #         agent: model.predict(observations[agent], deterministic=True)[0]
+    #         for agent in env.agents if match("uav", agent) #  and not infos[agent]
+    #     }
+    #     # print(actions)
+    #     observations, rewards, terminations, truncations, infos = env.step(actions)
+        
+    #     if not env.agents:
+    #         print("finish in : ", i)
+    #         break
+    #     if i % 5 == 0:
+    #         env.render()
+
+    # print("pass")
     
     observations, infos = env.reset(seed=seed)
     delivery_upper_solver = upper_solver(observations["truck"]["pos_obs"], num_customer_both, num_parcels_truck, num_parcels_uav, num_uavs)
-    # env.render()
-
-    TA_Scheduling_action = delivery_upper_solver.solve_greedy(observations["truck"], infos, uav_range)
-    env.TA_Scheduling(TA_Scheduling_action)
-    observations, rewards, terminations, truncations, infos = env.step({})
+    route_truck, clusters, centroids = delivery_upper_solver.solve_parking(grid_edge)
+    # print("clusters: ", clusters)
+    # print("centroids: ", centroids)
+    # print("route: ", route_truck)
     
-    for i in range(1500):
-        # this is where you would insert your policy
-        if infos["truck"] or (i % 6 == 5):
-            TA_Scheduling_action = delivery_upper_solver.solve_greedy(observations["truck"], infos, uav_range)
-            # print(TA_Scheduling_action)
-            env.TA_Scheduling(TA_Scheduling_action)
-        # print([
-        #     observations[a]
-        #     for a in observations if match('uav', a)
-        # ])
+    this_cluster = route_truck.pop()
+    if infos["truck"] and clusters[this_cluster]:
+        schedule_actions = {
+            'truck': centroids[this_cluster]
+        }
+    
+    # for info in infos:
+    #     # consider all the uav with the same range of 15_000 m
+    #     if infos[info] and match('uav', info) and clusters[this_cluster]:
+    #         schedule_actions[info] = clusters[this_cluster].pop()
+        
+    env.TA_Scheduling(schedule_actions)
+    for i in range(3_000):
+        # this is where you would insert your upper policy
+        schedule_actions.clear()
+        if infos["truck"] and not clusters[this_cluster]:
+            increase = True
+            # print(infos)
+            for info in infos:
+                if not infos[info] and match('uav', info):
+                    increase = False
+                    break
+            if increase:
+                this_cluster = route_truck.pop()
+                schedule_actions = {
+                    'truck': centroids[this_cluster]
+                }
+                env.TA_Scheduling(schedule_actions)
+                schedule_actions.clear()
+                if this_cluster <=4 and this_cluster:
+                    clusters[this_cluster].pop(0)
+        
+        if infos['truck']:
+            for info in infos:
+                # consider all the uav with the same range of 15_000 m
+                if infos[info] and match('uav', info) and clusters[this_cluster]:
+                    schedule_actions[info] = clusters[this_cluster].pop() - num_parcels_truck - 1
+                # if not infos[info] and match('uav', info):
+                #     schedule_actions.pop('truck')
+        
+        # print(schedule_actions)
+        env.TA_Scheduling(schedule_actions)
+        
         actions = {
-            # here is situated the policy
-            # agent: sample_action(env, observations, agent)
+            # here is situated the lower policy
             agent: model.predict(observations[agent], deterministic=True)[0]
             for agent in env.agents if match("uav", agent) #  and not infos[agent]
         }
-        # print(actions)
+
         observations, rewards, terminations, truncations, infos = env.step(actions)
+        
+        # print(infos)
         
         if not env.agents:
             print("finish in : ", i)
             break
         if i % 5 == 0:
             env.render()
-
-    # print("pass")
     
     env.close()
 

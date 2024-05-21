@@ -556,7 +556,7 @@ class DeliveryEnvironmentWithObstacle(ParallelEnv):
         for agent in actions:
             action = actions[agent]
             if match("truck", agent):
-                if isinstance(action, int):
+                if isinstance(action, np.int64) or isinstance(action, int):
                     self.infos[agent] = False
                     if action == 0:
                         self.truck_target_position = copy(self.warehouse_position)

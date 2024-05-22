@@ -122,15 +122,15 @@ if __name__ == "__main__":
     
     # train_uav_policy(1_000, True)
     
-    model_path = os.path.join("training", "models", "best_model_SAC_600K_0")
-    model = SAC.load(model_path)
+    model_path = os.path.join("training", "models", "best_model_12M_3_1024_2")
+    model = PPO.load(model_path)
     # print("eval result: ", evaluate_policy(model, env, n_eval_episodes=10, deterministic=True))
     obs, info = env.reset(options=0)
     # print(obs)
     # print(env.uav_position, env.truck_position, env.truck_target_position, obs["vecs"])
     rewards = 0
     env.render()
-    for _ in range(100):
+    for i in range(100):
     # while True:
         action, _ = model.predict(obs, deterministic=True)
         # action = env.action_space.sample()
@@ -139,7 +139,8 @@ if __name__ == "__main__":
         # print(env.uav_position, env.truck_position, env.truck_target_position, obs["vecs"])
         # print(reward)
         rewards += reward
-        env.render()
+        if i % 3 == 0:
+            env.render()
         if termination or truncation:
             # print(env.time_step, termination, truncation)
             break

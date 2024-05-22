@@ -9,7 +9,7 @@ from stable_baselines3 import PPO
 from pettingzoo.utils.env import ActionType, AgentID, ObsType, ParallelEnv
 from tsp_solver import solve_tsp
 from customer_clustering_solver import solve_drones_truck_with_parking
-import matplotlib.pyplot as plt
+import pandas as pd
 
 MAX_INT = 100
 
@@ -292,10 +292,10 @@ class upper_solver():
         
         tour, cost = solve_tsp(nodes, distances)
 
-        print("")
-        print(f"Optimal tour: {tour}")
-        print(f"Optimal cost: {cost:g}")
-        print("")
+        # print("")
+        # print(f"Optimal tour: {tour}")
+        # print(f"Optimal cost: {cost:g}")
+        # print("")
         return tour, cost
     
     
@@ -322,117 +322,19 @@ class upper_solver():
 #     def __init__(self) -> None:
 #         pass
 
-
-if __name__ == "__main__":
-    
-    seed = 20_021_122
-    
-    possible_agents = [
-        "truck", 
-        "uav_0_0", "uav_0_1", 
-        "uav_1_0", "uav_1_1", 
-        "uav_1_2", "uav_1_3", 
-    ]
-    
-    step_len = 2
-    # uav parameters
-    # unit here is m/s
-    truck_velocity = 4
-    uav_velocity = np.array([12, 29])
-    # unit here is kg
-    uav_capacity = np.array([10, 3.6])
-    # unit here is m
-    uav_range = np.array([10_000, 15_000])
-    uav_obs_range = 150
-    
-    num_truck = 1
-    num_uavs_0 = 1
-    num_uavs_1 = 1
-    num_uavs = num_uavs_0 + num_uavs_1
-    
-    # parcels parameters
-    num_parcels = 20
-    num_parcels_truck = 4
-    num_parcels_uav = 6
-    num_customer_truck = num_parcels - num_parcels_uav
-    num_customer_uav = num_parcels - num_parcels_truck
-    num_customer_both = num_parcels - num_parcels_truck - num_parcels_uav
-    weight_probabilities = [0.8, 0.1, 0.1]
-    
-    # map parameters
-    map_size = 10_000 # m as unit here
-    grid_edge = 125 # m as unit here
-    
-    # obstacle parameters
-    num_uav_obstacle = 1
-    num_no_fly_zone = 1
-    
-    env = DeliveryEnvironmentWithObstacle(
-        step_len=step_len, 
-        truck_velocity=truck_velocity, 
-        uav_velocity=uav_velocity, 
-        uav_capacity=uav_capacity, 
-        uav_range=uav_range, 
-        uav_obs_range=uav_obs_range, 
-        num_truck=num_truck, 
-        num_uavs=num_uavs, 
-        num_uavs_0=num_uavs_0, 
-        num_uavs_1=num_uavs_1, 
-        num_parcels=num_parcels, 
-        num_parcels_truck=num_parcels_truck, 
-        num_parcels_uav=num_parcels_uav, 
-        num_uav_obstacle=num_uav_obstacle, 
-        num_no_fly_zone=num_no_fly_zone, 
-        render_mode="human"
-    )
-    model_path = os.path.join("training", "models", "best_model_12M_3_1024_2")
-    model = PPO.load(model_path)
-    
-    # randList = [99112, 39566, 26912, 97613, 100615, 91316, 91792, 50701, 83019, 112200, 47254, 78875, 38088, 21103, 44819]
-    # for i in range(10):
-    # 47899, 108221, 103327, 12512, 65758
-    seed = random.randint(1, 114_514)
-    print(seed)
-    observations, infos = env.reset(seed=seed, options=1)
-    delivery_upper_solver = upper_solver(observations["truck"]["pos_obs"], num_customer_both, num_parcels_truck, num_parcels_uav, num_uavs)
-    route, _ = delivery_upper_solver.solve_TSP()
-    route = reshape_tsp_route(route)
-    
-    route.reverse()
-    for i in range(3_000):
-        # this is where you would insert your upper policy
-        if infos["truck"]:
-            schedule_actions = {
-                'truck': route.pop()
-            }
-            
-        env.TA_Scheduling(schedule_actions)
-        # actions = {
-        #     # here is situated the lower policy
-        #     agent: model.predict(observations[agent], deterministic=True)[0]
-        #     for agent in env.agents if match("uav", agent) #  and not infos[agent]
-        # }
-        observations, rewards, terminations, truncations, infos = env.step({'truck':None})
-        
-        if not env.agents:
-            print("finish in : ", i)
-            break
-        # if i % 15 == 0:
-        #     env.render()
-    
-    
+def run_hierarchical_policy_solution(env, model, seed, max_iter=2_000, render=None):
     observations, infos = env.reset(seed=seed)
-    # delivery_upper_solver = upper_solver(observations["truck"]["pos_obs"], num_customer_both, num_parcels_truck, num_parcels_uav, num_uavs)
+    solver = upper_solver(observations["truck"]["pos_obs"], num_customer_both, num_parcels_truck, num_parcels_uav, num_uavs)
     # env.render()
 
-    TA_Scheduling_action = delivery_upper_solver.solve_greedy(observations["truck"], infos, uav_range)
+    TA_Scheduling_action = solver.solve_greedy(observations["truck"], infos, uav_range)
     env.TA_Scheduling(TA_Scheduling_action)
     observations, rewards, terminations, truncations, infos = env.step({})
     
-    for i in range(1_500):
+    for i in range(max_iter):
         # this is where you would insert your policy
         if infos["truck"] or (i % 6 == 5):
-            TA_Scheduling_action = delivery_upper_solver.solve_greedy(observations["truck"], infos, uav_range)
+            TA_Scheduling_action = solver.solve_greedy(observations["truck"], infos, uav_range)
             # print(TA_Scheduling_action)
             env.TA_Scheduling(TA_Scheduling_action)
         # print([
@@ -449,16 +351,49 @@ if __name__ == "__main__":
         observations, rewards, terminations, truncations, infos = env.step(actions)
         
         if not env.agents:
-            print("finish in : ", i)
-            break
-        # if i % 5 == 0:
-        #     env.render()
+            # print("finish in : ", i)
+            return i
+        if render and (i % 5 == 0):
+            env.render()
+            
+    return 0
 
-    # print("pass")
+
+def run_tsp_solution(env, seed, max_iter=3_000, render=None):
+    observations, infos = env.reset(seed=seed, options=1)
+    solver = upper_solver(observations["truck"]["pos_obs"], num_customer_both, num_parcels_truck, num_parcels_uav, num_uavs)
+    route, _ = solver.solve_TSP()
+    route = reshape_tsp_route(route)
     
+    route.reverse()
+    for i in range(max_iter):
+        # this is where you would insert your upper policy
+        if infos["truck"]:
+            schedule_actions = {
+                'truck': route.pop()
+            }
+            
+        env.TA_Scheduling(schedule_actions)
+        # actions = {
+        #     # here is situated the lower policy
+        #     agent: model.predict(observations[agent], deterministic=True)[0]
+        #     for agent in env.agents if match("uav", agent) #  and not infos[agent]
+        # }
+        observations, rewards, terminations, truncations, infos = env.step({'truck':None})
+        
+        if not env.agents:
+            # print("tsp finish in : ", i)
+            return i
+        if render and (i % 15 == 0):
+            env.render()
+            
+    return 0
+            
+
+def run_carried_vehicle_supporting_drone_solution(env, model, seed, max_iter=3_000, render=None):
     observations, infos = env.reset(seed=seed)
-    # delivery_upper_solver = upper_solver(observations["truck"]["pos_obs"], num_customer_both, num_parcels_truck, num_parcels_uav, num_uavs)
-    route_truck, clusters, centroids = delivery_upper_solver.solve_parking(grid_edge)
+    solver = upper_solver(observations["truck"]["pos_obs"], num_customer_both, num_parcels_truck, num_parcels_uav, num_uavs)
+    route_truck, clusters, centroids = solver.solve_parking(grid_edge)
     # print("clusters: ", clusters)
     # print("centroids: ", centroids)
     # print("route: ", route_truck)
@@ -475,7 +410,7 @@ if __name__ == "__main__":
     #         schedule_actions[info] = clusters[this_cluster].pop()
         
     env.TA_Scheduling(schedule_actions)
-    for i in range(2_000):
+    for i in range(max_iter):
         # this is where you would insert your upper policy
         schedule_actions.clear()
         if infos["truck"] and not clusters[this_cluster]:
@@ -517,10 +452,197 @@ if __name__ == "__main__":
         # print(infos)
         
         if not env.agents:
-            print("finish in : ", i)
-            break
-        # if i % 5 == 0:
-        #     env.render()
+            # print("parking finish in : ", i)
+            return i
+        if render and (i % 5 == 0):
+            env.render()
+            
+    return 0
+
+
+if __name__ == "__main__":
     
-    env.close()
+    seed = 20_021_122
+    
+    possible_agents = [
+        "truck", 
+        "uav_0_0", "uav_0_1", 
+        "uav_1_0", "uav_1_1", 
+        "uav_1_2", "uav_1_3", 
+    ]
+    
+    step_len = 2
+    # uav parameters
+    # unit here is m/s
+    truck_velocity = 4
+    uav_velocity = np.array([12, 29])
+    # unit here is kg
+    uav_capacity = np.array([10, 3.6])
+    # unit here is m
+    uav_range = np.array([10_000, 15_000])
+    uav_obs_range = 150
+    
+    num_truck = 1
+    num_uavs_0 = 2
+    num_uavs_1 = 2
+    num_uavs = num_uavs_0 + num_uavs_1
+    
+    # parcels parameters
+    num_parcels = 20
+    num_parcels_truck = 4
+    num_parcels_uav = 6
+    num_customer_truck = num_parcels - num_parcels_uav
+    num_customer_uav = num_parcels - num_parcels_truck
+    num_customer_both = num_parcels - num_parcels_truck - num_parcels_uav
+    weight_probabilities = [0.8, 0.1, 0.1]
+    
+    # map parameters
+    map_size = 10_000 # m as unit here
+    grid_edge = 125 # m as unit here
+    
+    # obstacle parameters
+    num_uav_obstacle = 1
+    num_no_fly_zone = 1
+    
+    model_path = os.path.join("training", "models", "best_model_12M_3_1024_2")
+    model = PPO.load(model_path)
+    
+    # randList = [99112, 39566, 26912, 97613, 100615, 91316, 91792, 50701, 83019, 112200, 47254, 78875, 38088, 21103, 44819]
+    ep_num = 10
+    seed_seq = np.random.randint(1, 20_021_122, size=ep_num)
+    
+    customer_params_set = [
+        [20, 4, 6], 
+        [20, 6, 6], 
+        # [10, 2, 2], 
+        # [30, 6, 9], 
+        # [30, 6, 12], 
+        # [30, 5, 5], 
+        # [40, 8, 12], 
+        # [40, 10, 15], 
+        # [40, 10, 10]
+    ]
+    uav_params_set = [
+        [1, 1], 
+        [1, 2], 
+        # [2, 2], 
+        # [3, 2], 
+        # [4, 2]
+    ]
+    obstacle_params_set = [
+        [1, 1], 
+        [5, 1], 
+        # [10, 2]
+    ]
+    
+    # define the structure of result frame
+    results = {
+        'Solution': [],
+        'customer_params': [],
+        'uav_num': [], 
+        'obstacle_params': [],
+        'time_len_mean': [],
+        # 'success rate': [],
+    }
+
+    # convert to DataFrame
+    results_df = pd.DataFrame(results)
+    
+    for num_parcels, num_parcels_truck, num_parcels_uav in customer_params_set:
+        num_customer_truck = num_parcels - num_parcels_uav
+        num_customer_uav = num_parcels - num_parcels_truck
+        num_customer_both = num_parcels - num_parcels_truck - num_parcels_uav
+        for num_uavs_0, num_uavs_1 in uav_params_set:
+            num_uavs = num_uavs_0 + num_uavs_1
+            for num_uav_obstacle, num_no_fly_zone in obstacle_params_set:
+                env = DeliveryEnvironmentWithObstacle(
+                    step_len=step_len, 
+                    truck_velocity=truck_velocity, 
+                    uav_velocity=uav_velocity, 
+                    uav_capacity=uav_capacity, 
+                    uav_range=uav_range, 
+                    uav_obs_range=uav_obs_range, 
+                    num_truck=num_truck, 
+                    num_uavs=num_uavs, 
+                    num_uavs_0=num_uavs_0, 
+                    num_uavs_1=num_uavs_1, 
+                    num_parcels=num_parcels, 
+                    num_parcels_truck=num_parcels_truck, 
+                    num_parcels_uav=num_parcels_uav, 
+                    num_uav_obstacle=num_uav_obstacle, 
+                    num_no_fly_zone=num_no_fly_zone, 
+                    render_mode="human"
+                )
+                
+                time_len = 0
+                invalid_num = 0
+                time_len_tsp = 0
+                invalid_num_tsp = 0
+                time_len_parking = 0
+                invalid_num_parking = 0
+
+                for i in range(ep_num):
+                # 47899, 108221, 103327, 12512, 65758
+                    seed = int(seed_seq[i])
+                    print(seed)
+                    
+                    # result = run_tsp_solution(env, seed)
+                    # if result:
+                    #     time_len_tsp += result
+                    # else:
+                    #     invalid_num_tsp += 1
+                    time_len_tsp += run_tsp_solution(env, seed)
+                        
+                    # result = run_hierarchical_policy_solution(env, seed)
+                    # if result:
+                    #     time_len += result
+                    # else:
+                    #     invalid_num += 1
+                    time_len += run_hierarchical_policy_solution(env, model, seed)
+                        
+                    result = run_carried_vehicle_supporting_drone_solution(env, model, seed)
+                    if result:
+                        time_len_parking += result
+                    else:
+                        invalid_num_parking += 1
+                
+                print("time len mean: ", time_len / ep_num)
+                print("parking time len mean: ", time_len_parking / (ep_num - invalid_num_parking))
+                print("tsp time len mean: ", time_len_tsp / ep_num)
+                
+                new_row = pd.DataFrame([
+                    {
+                        'Solution': 'hierarchical_policy_solution',
+                        'customer_params': {'num_parcels_truck': num_parcels_truck, 
+                                            'num_parcels_uav': num_parcels_uav},
+                        'uav_num': num_uavs, 
+                        'obstacle_params': {'num_uav_obstacle': num_uav_obstacle, 
+                                            'num_no_fly_zone': num_no_fly_zone},
+                        'time_len_mean': time_len / ep_num,
+                    },
+                    {
+                        'Solution': 'carried_vehicle_supporting_drone_solution',
+                        'customer_params': {'num_parcels_truck': num_parcels_truck, 
+                                            'num_parcels_uav': num_parcels_uav},
+                        'uav_num': num_uavs, 
+                        'obstacle_params': {'num_uav_obstacle': num_uav_obstacle, 
+                                            'num_no_fly_zone': num_no_fly_zone},
+                        'time_len_mean': time_len_parking / (ep_num - invalid_num_parking),
+                    },
+                    {
+                        'Solution': 'tsp_solution',
+                        'customer_params': {'num_parcels_truck': num_parcels_truck, 
+                                            'num_parcels_uav': num_parcels_uav},
+                        'uav_num': num_uavs, 
+                        'obstacle_params': {'num_uav_obstacle': num_uav_obstacle, 
+                                            'num_no_fly_zone': num_no_fly_zone},
+                        'time_len_mean': time_len_tsp / ep_num,
+                    },
+                ])
+                results_df = pd.concat([results_df, new_row], ignore_index=True)
+                
+                env.close()
+                
+    # save as .CSV file
+    results_df.to_csv('experiment_results.csv', index=False)
 

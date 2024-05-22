@@ -15,7 +15,7 @@ MAX_INT = 2**20
 INVALID_ANGLE = 10
 # When the distance between the returning uav and the truck is less than this threshold, 
 # the return is considered complete.
-DIST_THRESHOLD = 20
+DIST_THRESHOLD = 40
 DIST_RESTRICT_UAV = 20
 DIST_RESTRICT_OBSTACLE = 75
 # rewards in various situations
@@ -297,20 +297,20 @@ class UAVTrainingEnvironmentWithObstacle(Env):
         
         rn = random.randint(0, 1)
         self.truck_position = np.array(
-            [random.randint(0.35 * self.map_size, 0.65 * self.map_size), random.randint(0.35 * grid_num, 0.65 * grid_num)*self.grid_edge] if rn % 2 
-             else [random.randint(0.35 * grid_num, 0.65 * grid_num)*self.grid_edge, random.randint(0.35 * self.map_size, 0.65 * self.map_size)], 
+            [random.randint(0.4 * self.map_size, 0.6 * self.map_size), random.randint(0.4 * grid_num, 0.6 * grid_num)*self.grid_edge] if rn % 2 
+             else [random.randint(0.4 * grid_num, 0.6 * grid_num)*self.grid_edge, random.randint(0.4 * self.map_size, 0.6 * self.map_size)], 
              dtype=np.int32
         )
         rn = random.randint(0, 1)
         self.customer_position = np.array(
-            [random.randint(0.35 * self.map_size, 0.65 * self.map_size), random.randint(0.35 * grid_num, 0.65 * grid_num)*self.grid_edge] if rn % 2 
-             else [random.randint(0.35 * grid_num, 0.65 * grid_num)*self.grid_edge, random.randint(0.35 * self.map_size, 0.65 * self.map_size)], 
+            [random.randint(0.4 * self.map_size, 0.6 * self.map_size), random.randint(0.4 * grid_num, 0.6 * grid_num)*self.grid_edge] if rn % 2 
+             else [random.randint(0.4 * grid_num, 0.6 * grid_num)*self.grid_edge, random.randint(0.4 * self.map_size, 0.6 * self.map_size)], 
              dtype=np.int32
         )
         rn = random.randint(0, 1)
         self.truck_target_position = np.array(
-            [random.randint(0.35 * self.map_size, 0.65 * self.map_size), random.randint(0.35 * grid_num, 0.65 * grid_num)*self.grid_edge] if rn % 2 
-             else [random.randint(0.35 * grid_num, 0.65 * grid_num)*self.grid_edge, random.randint(0.35 * self.map_size, 0.65 * self.map_size)], 
+            [random.randint(0.4 * self.map_size, 0.6 * self.map_size), random.randint(0.4 * grid_num, 0.6 * grid_num)*self.grid_edge] if rn % 2 
+             else [random.randint(0.4 * grid_num, 0.6 * grid_num)*self.grid_edge, random.randint(0.4 * self.map_size, 0.6 * self.map_size)], 
              dtype=np.int32
         )
         
@@ -344,7 +344,7 @@ class UAVTrainingEnvironmentWithObstacle(Env):
         
         # rn = random.randint(0, 1)
         # if rn and np.linalg.norm(offset) < 150:
-        # self.uav_obstacles.append(np.array([(self.uav_position + self.uav_target_position) / 2 - 50, [100, 100]]))
+        self.uav_obstacles.append(np.array([(self.uav_position + self.uav_target_position) / 2 - 50, [100, 100]]))
 
         observations = dict({
             "surroundings" : self.get_obs(), 
@@ -562,8 +562,8 @@ class UAVTrainingEnvironmentWithObstacle(Env):
             rn = random.randint(0, 1)
             grid_num = self.map_size / self.grid_edge
             self.truck_target_position = np.array(
-                [random.randint(0.35 * self.map_size, 0.65 * self.map_size), random.randint(0.35 * grid_num, 0.65 * grid_num)*self.grid_edge] if rn % 2 
-                else [random.randint(0.35 * grid_num, 0.65 * grid_num)*self.grid_edge, random.randint(0.35 * self.map_size, 0.65 * self.map_size)] 
+                [random.randint(0.4 * self.map_size, 0.6 * self.map_size), random.randint(0.4 * grid_num, 0.6 * grid_num)*self.grid_edge] if rn % 2 
+                else [random.randint(0.4 * grid_num, 0.6 * grid_num)*self.grid_edge, random.randint(0.4 * self.map_size, 0.6 * self.map_size)] 
             )
 
         terminated = False

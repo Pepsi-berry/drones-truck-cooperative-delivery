@@ -33,8 +33,9 @@ def constrains(labels, centroids, nodes, limit=1_500):
 
 def customer_cluster(nodes, fixed_centroids):
     num_nodes = nodes.shape[0]
+    num_centroids = fixed_centroids.shape[0]
     # num_fixed_centroids = fixed_centroids.shape[0]
-    for i in range(int(num_nodes / 4), num_nodes):
+    for i in range(num_centroids, num_nodes):
         # keep the number of clusters small
         for _ in range(2):
             while True:

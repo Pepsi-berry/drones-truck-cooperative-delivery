@@ -96,6 +96,7 @@ def solve_tsp(nodes, distances):
     with gp.Env() as env, gp.Model(env=env) as m:
         # Create variables, and add symmetric keys to the resulting dictionary
         # 'x', such that (i, j) and (j, i) refer to the same variable.
+        m.setParam('OutputFlag', 0) # prevent the gurobi logs output to console
         x = m.addVars(distances.keys(), obj=distances, vtype=GRB.BINARY, name="e")
         x.update({(j, i): v for (i, j), v in x.items()})
 

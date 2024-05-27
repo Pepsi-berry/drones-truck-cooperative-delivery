@@ -15,7 +15,7 @@ MAX_INT = 2**20
 INVALID_ANGLE = 10
 # When the distance between the returning uav and the truck is less than this threshold, 
 # the return is considered complete.
-DIST_THRESHOLD = 40
+DIST_THRESHOLD = 20
 DIST_RESTRICT_UAV = 20
 DIST_RESTRICT_OBSTACLE = 75
 # rewards in various situations
@@ -167,8 +167,8 @@ class UAVTrainingEnvironmentWithObstacle(Env):
             not_suitable = False
             upper_left_corner = np.array([random.randint(4 * self.grid_edge, self.map_size - 5 * self.grid_edge),
                                         random.randint(4 * self.grid_edge, self.map_size - 5 * self.grid_edge)])
-            range_size = np.array([random.randrange(0.6 * self.grid_edge, 1.2 * self.grid_edge, step=5), 
-                                random.randrange(0.6 * self.grid_edge, 1.2 * self.grid_edge, step=5)])
+            range_size = np.array([random.randrange(0.8 * self.grid_edge, 1.2 * self.grid_edge, step=5), 
+                                random.randrange(0.8 * self.grid_edge, 1.2 * self.grid_edge, step=5)])
             lower_right_corner = upper_left_corner + range_size
             if self.uav_position[0] > upper_left_corner[0] and self.uav_position[0] < lower_right_corner[0] and self.uav_position[1] > upper_left_corner[1] and self.uav_position[1] < lower_right_corner[1]:
                 not_suitable = True

@@ -443,10 +443,12 @@ class DeliveryEnvironmentWithObstacle(ParallelEnv):
              for i in range(self.num_customer_both)], dtype=np.int32
             )
         
-        # self.no_fly_zones = np.array([self.generate_no_fly_zone() for _ in range(self.num_no_fly_zone)])
-        # self.uav_obstacles = [self.generate_uav_obstacle(grid_num) for _ in range(self.num_uav_obstacle)]
-        self.no_fly_zones = []
-        self.uav_obstacles = []
+        # if self.num_no_fly_zone or self.num_uav_obstacle:
+        self.no_fly_zones = np.array([self.generate_no_fly_zone() for _ in range(self.num_no_fly_zone)])
+        self.uav_obstacles = [self.generate_uav_obstacle(grid_num) for _ in range(self.num_uav_obstacle)]
+        # else:
+            # self.no_fly_zones = []
+            # self.uav_obstacles = []
         
         # Initially, the target points of all agents are not determined
         # So the truck path is set to empty

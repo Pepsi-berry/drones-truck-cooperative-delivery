@@ -427,7 +427,7 @@ def run_carried_vehicle_supporting_drone_solution(env, model, seed, max_iter=3_0
                 }
                 env.TA_Scheduling(schedule_actions)
                 schedule_actions.clear()
-                if this_cluster <=4 and this_cluster:
+                if this_cluster <= num_parcels_truck and this_cluster:
                     clusters[this_cluster].pop(0)
         
         if infos['truck']:
@@ -508,12 +508,22 @@ if __name__ == "__main__":
     model = PPO.load(model_path)
     
     # randList = [99112, 39566, 26912, 97613, 100615, 91316, 91792, 50701, 83019, 112200, 47254, 78875, 38088, 21103, 44819]
-    ep_num = 10
+    ep_num = 1
     seed_seq = np.random.randint(1, 20_021_122, size=ep_num)
+    # seed_seq = [# 12831503, 8783665, 13697239, 17765942, 5782998, 
+    #             8324678, # 5859629, 3410441, 6293047, 17758899, 
+    #             # 17855103, 9974297, 19783562, 15393630, 11538025, 
+    #             # 14505477, 12396531,  7001911, 13342663, 12587394, 
+    #             # 2925388, 8120709, 11921896, 17496592, 10244225, 
+    #             # 5900518, 18898807,  4809629,  7023294, 16910173, 15270425, 19131162,
+    #             # 17327394, 12642687,  7028938, 19562665, 16276660, 13756282,  3555379,  3015676,
+    #             # 13257574, 19678909,  6546734,  5069702,  9966370, 13302556, 13478283,  3893352,
+    #             # 4994314, 1590666
+    #             ]
     
     customer_params_set = [
         [20, 4, 6], 
-        [20, 6, 6], 
+        # [20, 6, 6], 
         # [10, 2, 2], 
         # [30, 6, 9], 
         # [30, 6, 12], 
@@ -523,15 +533,16 @@ if __name__ == "__main__":
         # [40, 10, 10]
     ]
     uav_params_set = [
-        [1, 1], 
-        [1, 2], 
-        # [2, 2], 
+        # [1, 1], 
+        # [1, 2], 
+        [2, 2], 
         # [3, 2], 
         # [4, 2]
     ]
     obstacle_params_set = [
-        [1, 1], 
-        [5, 1], 
+        [0, 0],
+        # [1, 1], 
+        # [5, 1], 
         # [10, 2]
     ]
     
@@ -542,6 +553,7 @@ if __name__ == "__main__":
         'uav_num': [], 
         'obstacle_params': [],
         'time_len_mean': [],
+        'time_len_std': [],
         # 'success rate': [],
     }
 
@@ -574,41 +586,29 @@ if __name__ == "__main__":
                     render_mode="human"
                 )
                 
-                time_len = 0
-                invalid_num = 0
-                time_len_tsp = 0
-                invalid_num_tsp = 0
-                time_len_parking = 0
-                invalid_num_parking = 0
+                time_len_list = []
+                time_len_parking_list = []
+                time_len_tsp_list = []
 
                 for i in range(ep_num):
                 # 47899, 108221, 103327, 12512, 65758
                     seed = int(seed_seq[i])
                     print(seed)
                     
-                    # result = run_tsp_solution(env, seed)
-                    # if result:
-                    #     time_len_tsp += result
-                    # else:
-                    #     invalid_num_tsp += 1
-                    time_len_tsp += run_tsp_solution(env, seed)
+                    # time_len_tsp_list = np.append(time_len_tsp_list, [run_tsp_solution(env, seed)])
+
+                    time_len_list = np.append(time_len_list, [run_hierarchical_policy_solution(env, model, seed, render=True)])
                         
-                    # result = run_hierarchical_policy_solution(env, seed)
+                    # result = run_carried_vehicle_supporting_drone_solution(env, model, seed)
                     # if result:
-                    #     time_len += result
-                    # else:
-                    #     invalid_num += 1
-                    time_len += run_hierarchical_policy_solution(env, model, seed)
-                        
-                    result = run_carried_vehicle_supporting_drone_solution(env, model, seed)
-                    if result:
-                        time_len_parking += result
-                    else:
-                        invalid_num_parking += 1
+                    #     time_len_parking_list = np.append(time_len_parking_list, [result])
                 
-                print("time len mean: ", time_len / ep_num)
-                print("parking time len mean: ", time_len_parking / (ep_num - invalid_num_parking))
-                print("tsp time len mean: ", time_len_tsp / ep_num)
+                # print(num_parcels, num_parcels_truck, num_parcels_uav, num_uavs_0, num_uavs_1, num_uav_obstacle, num_no_fly_zone)
+                
+                # print("time len mean: ", time_len / ep_num)
+                print("parking time len mean: ", np.mean(time_len_list))
+                print("parking time len std: ", np.std(time_len_list))
+                # print("tsp time len mean: ", time_len_tsp / ep_num)
                 
                 new_row = pd.DataFrame([
                     {
@@ -618,26 +618,28 @@ if __name__ == "__main__":
                         'uav_num': num_uavs, 
                         'obstacle_params': {'num_uav_obstacle': num_uav_obstacle, 
                                             'num_no_fly_zone': num_no_fly_zone},
-                        'time_len_mean': time_len / ep_num,
+                        'time_len_mean': np.mean(time_len_list),
+                        'time_len_std': np.std(time_len_list),
                     },
-                    {
-                        'Solution': 'carried_vehicle_supporting_drone_solution',
-                        'customer_params': {'num_parcels_truck': num_parcels_truck, 
-                                            'num_parcels_uav': num_parcels_uav},
-                        'uav_num': num_uavs, 
-                        'obstacle_params': {'num_uav_obstacle': num_uav_obstacle, 
-                                            'num_no_fly_zone': num_no_fly_zone},
-                        'time_len_mean': time_len_parking / (ep_num - invalid_num_parking),
-                    },
-                    {
-                        'Solution': 'tsp_solution',
-                        'customer_params': {'num_parcels_truck': num_parcels_truck, 
-                                            'num_parcels_uav': num_parcels_uav},
-                        'uav_num': num_uavs, 
-                        'obstacle_params': {'num_uav_obstacle': num_uav_obstacle, 
-                                            'num_no_fly_zone': num_no_fly_zone},
-                        'time_len_mean': time_len_tsp / ep_num,
-                    },
+                    # {
+                    #     'Solution': 'carried_vehicle_supporting_drone_solution',
+                    #     'customer_params': {'num_parcels_truck': num_parcels_truck, 
+                    #                         'num_parcels_uav': num_parcels_uav},
+                    #     'uav_num': num_uavs, 
+                    #     'obstacle_params': {'num_uav_obstacle': num_uav_obstacle, 
+                    #                         'num_no_fly_zone': num_no_fly_zone},
+                    #     'time_len_mean': np.mean(time_len_list),
+                    #     'time_len_std': np.std(time_len_list),
+                    # },
+                #     {
+                #         'Solution': 'tsp_solution',
+                #         'customer_params': {'num_parcels_truck': num_parcels_truck, 
+                #                             'num_parcels_uav': num_parcels_uav},
+                #         'uav_num': num_uavs, 
+                #         'obstacle_params': {'num_uav_obstacle': num_uav_obstacle, 
+                #                             'num_no_fly_zone': num_no_fly_zone},
+                #         'time_len_mean': time_len_tsp / ep_num,
+                #     },
                 ])
                 results_df = pd.concat([results_df, new_row], ignore_index=True)
                 

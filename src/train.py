@@ -124,13 +124,14 @@ if __name__ == "__main__":
     
     model_path = os.path.join("training", "models", "best_model_12M_3_1024_2")
     model = PPO.load(model_path)
-    # print("eval result: ", evaluate_policy(model, env, n_eval_episodes=10, deterministic=True))
+    # print(model.policy)
+    # print("eval result: ", evaluate_policy(model, env, n_eval_episodes=20, deterministic=True))
     obs, info = env.reset(options=0)
     # print(obs)
     # print(env.uav_position, env.truck_position, env.truck_target_position, obs["vecs"])
     rewards = 0
     env.render()
-    for i in range(100):
+    for i in range(20):
     # while True:
         action, _ = model.predict(obs, deterministic=True)
         # action = env.action_space.sample()

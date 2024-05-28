@@ -24,7 +24,7 @@ REWARD_VICTORY = 100
 REWARD_UAV_WRECK = -2
 REWARD_UAV_VIOLATE = -2
 REWARD_UAV_ARRIVAL = 20
-REWARD_URGENCY = -0.05
+REWARD_URGENCY = -0.1
 REWARD_APPROUCHING = 0.02 # get REWARD_APPROUCHING when get closer to target
 REWARD_OBSTACLE_AVOIDANCE = -2e-4 # to encourage agents to keep themselves away from obstacles
 REWARD_SLOW = -0.02
@@ -170,7 +170,15 @@ class UAVTrainingEnvironmentWithObstacle(Env):
             range_size = np.array([random.randrange(0.8 * self.grid_edge, 1.2 * self.grid_edge, step=5), 
                                 random.randrange(0.8 * self.grid_edge, 1.2 * self.grid_edge, step=5)])
             lower_right_corner = upper_left_corner + range_size
+            if self.option:
+                target_of_target = self.customer_position
+            else:
+                target_of_target = self.truck_target_position
             if self.uav_position[0] > upper_left_corner[0] and self.uav_position[0] < lower_right_corner[0] and self.uav_position[1] > upper_left_corner[1] and self.uav_position[1] < lower_right_corner[1]:
+                not_suitable = True
+            if self.uav_target_position[0] > upper_left_corner[0] and self.uav_target_position[0] < lower_right_corner[0] and self.uav_target_position[1] > upper_left_corner[1] and self.uav_target_position[1] < lower_right_corner[1]:
+                not_suitable = True
+            if target_of_target[0] > upper_left_corner[0] and target_of_target[0] < lower_right_corner[0] and target_of_target[1] > upper_left_corner[1] and target_of_target[1] < lower_right_corner[1]:
                 not_suitable = True
             if not_suitable:
                 continue
@@ -289,7 +297,7 @@ class UAVTrainingEnvironmentWithObstacle(Env):
         if options is None:
             # self.option = 1 - random.randint(0, 1) * random.randint(0, 1) * random.randint(0, 1)
             # self.option = 1 - int(random.randint(1, 32) / 32)
-            self.option = 1 # + random.randint(0, 1)
+            self.option = 0 #  + random.randint(0, 1) * random.randint(0, 1)
         else:
             self.option = options
         
@@ -297,28 +305,30 @@ class UAVTrainingEnvironmentWithObstacle(Env):
         
         rn = random.randint(0, 1)
         self.truck_position = np.array(
-            [random.randint(0.4 * self.map_size, 0.6 * self.map_size), random.randint(0.4 * grid_num, 0.6 * grid_num)*self.grid_edge] if rn % 2 
-             else [random.randint(0.4 * grid_num, 0.6 * grid_num)*self.grid_edge, random.randint(0.4 * self.map_size, 0.6 * self.map_size)], 
+            [random.randint(0.3 * self.map_size, 0.7 * self.map_size), random.randint(0.3 * grid_num, 0.7 * grid_num)*self.grid_edge] if rn % 2 
+             else [random.randint(0.3 * grid_num, 0.7 * grid_num)*self.grid_edge, random.randint(0.3 * self.map_size, 0.7 * self.map_size)], 
              dtype=np.int32
         )
         rn = random.randint(0, 1)
         self.customer_position = np.array(
-            [random.randint(0.4 * self.map_size, 0.6 * self.map_size), random.randint(0.4 * grid_num, 0.6 * grid_num)*self.grid_edge] if rn % 2 
-             else [random.randint(0.4 * grid_num, 0.6 * grid_num)*self.grid_edge, random.randint(0.4 * self.map_size, 0.6 * self.map_size)], 
+            [random.randint(0.3 * self.map_size, 0.7 * self.map_size), random.randint(0.3 * grid_num, 0.7 * grid_num)*self.grid_edge] if rn % 2 
+             else [random.randint(0.3 * grid_num, 0.7 * grid_num)*self.grid_edge, random.randint(0.3 * self.map_size, 0.7 * self.map_size)], 
              dtype=np.int32
         )
         rn = random.randint(0, 1)
         self.truck_target_position = np.array(
-            [random.randint(0.4 * self.map_size, 0.6 * self.map_size), random.randint(0.4 * grid_num, 0.6 * grid_num)*self.grid_edge] if rn % 2 
-             else [random.randint(0.4 * grid_num, 0.6 * grid_num)*self.grid_edge, random.randint(0.4 * self.map_size, 0.6 * self.map_size)], 
+            [random.randint(0.3 * self.map_size, 0.7 * self.map_size), random.randint(0.3 * grid_num, 0.7 * grid_num)*self.grid_edge] if rn % 2 
+             else [random.randint(0.3 * grid_num, 0.7 * grid_num)*self.grid_edge, random.randint(0.3 * self.map_size, 0.7 * self.map_size)], 
              dtype=np.int32
         )
         
-        generative_range = 1000 #  + int(1 - random.randint(1, 4) / 4) * 500
+        generative_range = 750 #  + int(random.randint(1, 4) / 4) * 1000
         generative_lower_bound = 150
         # offset = np.array([random.randint(-1 * generative_range, generative_range), random.randint(-1 * generative_range, generative_range)], dtype=np.int32)
-        offset = np.array([random.choice([random.randint(-1 * generative_range, -1 * generative_lower_bound), random.randint(generative_lower_bound, generative_range)]), 
-                           random.choice([random.randint(-1 * generative_range, -1 * generative_lower_bound), random.randint(generative_lower_bound, generative_range)])])
+        offset = np.array([
+            random.choice([random.randint(-1 * generative_range, -1 * generative_lower_bound), random.randint(generative_lower_bound, generative_range)]), 
+            random.choice([random.randint(-1 * generative_range, -1 * generative_lower_bound), random.randint(generative_lower_bound, generative_range)])
+        ])
         target_of_target = None
         if self.option:
             self.uav_target_position = self.customer_position
@@ -341,10 +351,12 @@ class UAVTrainingEnvironmentWithObstacle(Env):
         
         self.no_fly_zones = np.array([self.generate_no_fly_zone() for _ in range(self.num_no_fly_zone)])
         self.uav_obstacles = [self.generate_uav_obstacle(grid_num) for _ in range(self.num_uav_obstacle)] #  + [np.array([self.uav_position + 20, [100, 100]])]
-        
-        # rn = random.randint(0, 1)
-        # if rn and np.linalg.norm(offset) < 150:
-        self.uav_obstacles.append(np.array([(self.uav_position + self.uav_target_position) / 2 - 50, [100, 100]]))
+        self.uav_obstacles.append(
+            np.array([
+                generate_random_upper_left_corner(self.uav_position, self.uav_target_position), 
+                [random.randint(int(abs(offset[0]) / 10), int(abs(offset[0]) / 3)), random.randint(int(abs(offset[0]) / 10), int(abs(offset[0]) / 3))]
+            ])
+        )
 
         observations = dict({
             "surroundings" : self.get_obs(), 
@@ -562,8 +574,8 @@ class UAVTrainingEnvironmentWithObstacle(Env):
             rn = random.randint(0, 1)
             grid_num = self.map_size / self.grid_edge
             self.truck_target_position = np.array(
-                [random.randint(0.4 * self.map_size, 0.6 * self.map_size), random.randint(0.4 * grid_num, 0.6 * grid_num)*self.grid_edge] if rn % 2 
-                else [random.randint(0.4 * grid_num, 0.6 * grid_num)*self.grid_edge, random.randint(0.4 * self.map_size, 0.6 * self.map_size)] 
+                [random.randint(0.3 * self.map_size, 0.7 * self.map_size), random.randint(0.3 * grid_num, 0.7 * grid_num)*self.grid_edge] if rn % 2 
+                else [random.randint(0.3 * grid_num, 0.7 * grid_num)*self.grid_edge, random.randint(0.3 * self.map_size, 0.7 * self.map_size)] 
             )
 
         terminated = False
@@ -702,3 +714,16 @@ def get_image(path):
 def cross_product_2d_array(v1, v2):
     return v1[0] * v2[1] - v2[0] * v1[1]
 
+def generate_random_upper_left_corner(p1, p2):
+    xlo, xhi, ylo, yhi = (
+        min(p1[0], p2[0]), 
+        max(p1[0], p2[0]), 
+        min(p1[1], p2[1]), 
+        max(p1[1], p2[1])
+    )
+    
+    offset_x = xhi - xlo
+    offset_y = yhi - ylo
+    
+    return [int(xlo + (random.randrange(5, 45) / 100) * offset_x), 
+            int(ylo + (random.randrange(5, 45) / 100) * offset_y)]

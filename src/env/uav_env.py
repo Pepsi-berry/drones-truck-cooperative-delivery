@@ -322,7 +322,7 @@ class UAVTrainingEnvironmentWithObstacle(Env):
              dtype=np.int32
         )
         
-        generative_range = 750 #  + int(random.randint(1, 4) / 4) * 1000
+        generative_range = 1000 #  + int(random.randint(1, 4) / 4) * 1000
         generative_lower_bound = 150
         # offset = np.array([random.randint(-1 * generative_range, generative_range), random.randint(-1 * generative_range, generative_range)], dtype=np.int32)
         offset = np.array([
@@ -354,7 +354,7 @@ class UAVTrainingEnvironmentWithObstacle(Env):
         self.uav_obstacles.append(
             np.array([
                 generate_random_upper_left_corner(self.uav_position, self.uav_target_position), 
-                [random.randint(int(abs(offset[0]) / 10), int(abs(offset[0]) / 3)), random.randint(int(abs(offset[0]) / 10), int(abs(offset[0]) / 3))]
+                [random.randint(int(abs(offset[0]) / 5), int(abs(offset[0]) / 2)), random.randint(int(abs(offset[0]) / 5), int(abs(offset[0]) / 2))]
             ])
         )
 

@@ -44,7 +44,7 @@ class DeliveryEnvironmentWithObstacle(ParallelEnv):
     """
 
     metadata = {
-        "render_modes": [None, "human"],
+        "render_modes": [None, "human", "rgb_array"],
         "name": "delivery_environment_v2",
     }
 
@@ -973,6 +973,8 @@ class DeliveryEnvironmentWithObstacle(ParallelEnv):
             if self.render_mode == "human":
                 pygame.display.set_caption("Truck & UAVs")
                 self.screen = pygame.display.set_mode((screen_width, screen_height))
+            elif self.render_mode == "rgb_array":
+                self.screen = pygame.Surface((screen_width, screen_height))
         
         # Load the texture used to render the scene
         map_image = get_image(os.path.join("img", "Map5.png"))
@@ -1020,7 +1022,17 @@ class DeliveryEnvironmentWithObstacle(ParallelEnv):
             pygame.event.pump()
             pygame.display.update()
             self.clock.tick(10)
+            
+        observation = pygame.surfarray.pixels3d(self.screen)
+        new_observation = np.copy(observation)
+        del observation
+        return (
+            np.transpose(new_observation, axes=(1, 0, 2))
+            if self.render_mode == "rgb_array"
+            else None
+        )
         
+                
     def close(self):
         if self.screen is not None:
             pygame.quit()

@@ -122,16 +122,16 @@ if __name__ == "__main__":
     
     # train_uav_policy(1_000, True)
     
-    model_path = os.path.join("training", "models", "best_model_12M_3_1024_2")
-    model = PPO.load(model_path)
+    model_path = os.path.join("training", "models", "best_model_SAC_20K")
+    model = SAC.load(model_path)
     # print(model.policy)
-    # print("eval result: ", evaluate_policy(model, env, n_eval_episodes=20, deterministic=True))
+    # print("eval result: ", evaluate_policy(model, env, n_eval_episodes=10, deterministic=True))
     obs, info = env.reset(options=0)
     # print(obs)
     # print(env.uav_position, env.truck_position, env.truck_target_position, obs["vecs"])
     rewards = 0
     env.render()
-    for i in range(20):
+    for i in range(50):
     # while True:
         action, _ = model.predict(obs, deterministic=True)
         # action = env.action_space.sample()

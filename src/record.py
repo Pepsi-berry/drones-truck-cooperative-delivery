@@ -386,7 +386,7 @@ def run_hierarchical_policy_solution(env, model, seed, max_iter=2_000, render=No
         if not env.agents:
             # print("finish in : ", i)
             if video_record:
-                video_name = save_video(video_frame, "hierarchical_video_2", 30, 'delivery_env', fps=30)
+                video_name = save_video(video_frame, "hierarchical_video", 15, 'delivery_env', fps=15)
                 last_frame_location = save_last_frame(video_frame[-1], "last_frame", i, 'delivery_env')
                 print('video_name: ', video_name)
                 print('last_frame_location: ', last_frame_location)
@@ -425,7 +425,7 @@ def run_tsp_solution(env, seed, max_iter=3_000, render=None, video_record=False)
         if not env.agents:
             # print("tsp finish in : ", i)
             if video_record:
-                video_name = save_video(video_frame, "tsp_video_2", 30, 'delivery_env', fps=30)
+                video_name = save_video(video_frame, "tsp_video", 15, 'delivery_env', fps=15)
                 last_frame_location = save_last_frame(video_frame[-1], "last_frame", i, 'delivery_env')
                 print('video_name: ', video_name)
                 print('last_frame_location: ', last_frame_location)
@@ -503,7 +503,7 @@ def run_carried_vehicle_supporting_drone_solution(env, model, seed, max_iter=3_0
         if not env.agents:
             # print("parking finish in : ", i)
             if video_record:
-                video_name = save_video(video_frame, "parking_video_2", 30, 'delivery_env', fps=30)
+                video_name = save_video(video_frame, "parking_video", 15, 'delivery_env', fps=15)
                 last_frame_location = save_last_frame(video_frame[-1], "last_frame", i, 'delivery_env')
                 print('video_name: ', video_name)
                 print('last_frame_location: ', last_frame_location)
@@ -565,7 +565,7 @@ if __name__ == "__main__":
     
     # randList = [99112, 39566, 26912, 97613, 100615, 91316, 91792, 50701, 83019, 112200, 47254, 78875, 38088, 21103, 44819]
     ep_num = 1
-    # seed_seq = np.random.randint(1, seed_range, size=ep_num)
+    seed_seq = np.random.randint(1, seed_range, size=ep_num)
     seed_seq = [597215]
     # seed_seq = [# 12831503, 8783665, 13697239, 17765942, 5782998, 
     #             8324678, # 5859629, 3410441, 6293047, 17758899, 
@@ -648,6 +648,7 @@ if __name__ == "__main__":
                 else:
                     video_record = False
                     
+                print(video_record)
                 
                 time_len_list = []
                 time_len_parking_list = []
@@ -658,9 +659,9 @@ if __name__ == "__main__":
                     seed = int(seed_seq[i])
                     print(seed)
                     
-                    # time_len_tsp_list = np.append(time_len_tsp_list, [run_tsp_solution(env, seed, render=None, video_record=video_record)])
+                    time_len_tsp_list = np.append(time_len_tsp_list, [run_tsp_solution(env, seed, render=None, video_record=video_record)])
 
-                    # time_len_list = np.append(time_len_list, [run_hierarchical_policy_solution(env, model, seed, render=None, video_record=video_record)])
+                    time_len_list = np.append(time_len_list, [run_hierarchical_policy_solution(env, model, seed, render=None, video_record=video_record)])
                         
                     result = run_carried_vehicle_supporting_drone_solution(env, model, seed, render=None, video_record=video_record)
                     if result:
@@ -668,46 +669,46 @@ if __name__ == "__main__":
                 
                 # print(num_parcels, num_parcels_truck, num_parcels_uav, num_uavs_0, num_uavs_1, num_uav_obstacle, num_no_fly_zone)
                 
-                # print("time len mean: ", np.mean(time_len_list))
+                print("time len mean: ", np.mean(time_len_list))
                 print("parking time len mean: ", np.mean(time_len_parking_list))
                 # print("parking time len std: ", np.std(time_len_list))
-                # print("tsp time len mean: ", np.mean(time_len_tsp_list))
+                print("tsp time len mean: ", np.mean(time_len_tsp_list))
                 
-                # new_row = pd.DataFrame([
+                new_row = pd.DataFrame([
+                    {
+                        'Solution': 'hierarchical_policy_solution',
+                        'customer_params': {'num_parcels_truck': num_parcels_truck, 
+                                            'num_parcels_uav': num_parcels_uav},
+                        'uav_num': num_uavs, 
+                        'obstacle_params': {'num_uav_obstacle': num_uav_obstacle, 
+                                            'num_no_fly_zone': num_no_fly_zone},
+                        'time_len_mean': np.mean(time_len_list),
+                        'time_len_std': np.std(time_len_list),
+                    },
+                    # {
+                    #     'Solution': 'carried_vehicle_supporting_drone_solution',
+                    #     'customer_params': {'num_parcels_truck': num_parcels_truck, 
+                    #                         'num_parcels_uav': num_parcels_uav},
+                    #     'uav_num': num_uavs, 
+                    #     'obstacle_params': {'num_uav_obstacle': num_uav_obstacle, 
+                    #                         'num_no_fly_zone': num_no_fly_zone},
+                    #     'time_len_mean': np.mean(time_len_list),
+                    #     'time_len_std': np.std(time_len_list),
+                    # },
                 #     {
-                #         'Solution': 'hierarchical_policy_solution',
+                #         'Solution': 'tsp_solution',
                 #         'customer_params': {'num_parcels_truck': num_parcels_truck, 
                 #                             'num_parcels_uav': num_parcels_uav},
                 #         'uav_num': num_uavs, 
                 #         'obstacle_params': {'num_uav_obstacle': num_uav_obstacle, 
                 #                             'num_no_fly_zone': num_no_fly_zone},
-                #         'time_len_mean': np.mean(time_len_list),
-                #         'time_len_std': np.std(time_len_list),
+                #         'time_len_mean': time_len_tsp / ep_num,
                 #     },
-                #     # {
-                #     #     'Solution': 'carried_vehicle_supporting_drone_solution',
-                #     #     'customer_params': {'num_parcels_truck': num_parcels_truck, 
-                #     #                         'num_parcels_uav': num_parcels_uav},
-                #     #     'uav_num': num_uavs, 
-                #     #     'obstacle_params': {'num_uav_obstacle': num_uav_obstacle, 
-                #     #                         'num_no_fly_zone': num_no_fly_zone},
-                #     #     'time_len_mean': np.mean(time_len_list),
-                #     #     'time_len_std': np.std(time_len_list),
-                #     # },
-                # #     {
-                # #         'Solution': 'tsp_solution',
-                # #         'customer_params': {'num_parcels_truck': num_parcels_truck, 
-                # #                             'num_parcels_uav': num_parcels_uav},
-                # #         'uav_num': num_uavs, 
-                # #         'obstacle_params': {'num_uav_obstacle': num_uav_obstacle, 
-                # #                             'num_no_fly_zone': num_no_fly_zone},
-                # #         'time_len_mean': time_len_tsp / ep_num,
-                # #     },
-                # ])
-                # results_df = pd.concat([results_df, new_row], ignore_index=True)
+                ])
+                results_df = pd.concat([results_df, new_row], ignore_index=True)
                 
                 env.close()
                 
     # save as .CSV file
-    # results_df.to_csv('experiment_results.csv', index=False)
+    results_df.to_csv('experiment_results.csv', index=False)
 

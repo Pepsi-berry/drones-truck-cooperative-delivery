@@ -1,21 +1,15 @@
+import os
 import numpy as np
 from re import match, findall
 import random
+from itertools import combinations
 from env.delivery_env_with_obstacle import DeliveryEnvironmentWithObstacle
 # from env.uav_env import UAVTrainingEnvironmentWithObstacle
-from pettingzoo.test import parallel_api_test # , render_test
-# from gymnasium.spaces import MultiDiscrete, Dict, MultiBinary, Box
+from stable_baselines3 import SAC
 from pettingzoo.utils.env import ActionType, AgentID, ObsType, ParallelEnv
-# import os
-# from copy import copy
-# import glob
-# import time
-# import supersuit as ss
-# from env.delivery_env import DeliveryEnvironment
-# from stable_baselines3 import PPO
-# from pettingzoo.utils import parallel_to_aec
-# from stable_baselines3.common.evaluation import evaluate_policy
-
+from tsp_solver import solve_tsp
+from customer_clustering_solver import solve_drones_truck_with_parking
+import matplotlib.pyplot as plt
 
 MAX_INT = 100
 
@@ -32,12 +26,14 @@ def sample_action(
         return random.choice(legal_actions)
     return env.action_space(agent).sample()
 
+
 def get_uav_info(uav):
     # get the uav info: kind and no.
     uav_info = findall(r'\d+', uav)
     uav_info = [int(num) for num in uav_info]
     uav_no = uav_info[0] * 2 + uav_info[1]
     return uav_info + [uav_no]
+
 
 def zones_intersection(zone, xlo , xhi, ylo, yhi):
     lower_left = zone[0]
@@ -52,24 +48,42 @@ def zones_intersection(zone, xlo , xhi, ylo, yhi):
             max(ylo, lower_left[1]), 
             min(yhi, upper_right[1])])
         
-class upper_solver():
-    def __init__(self, pos_obs) -> None:
-        self.warehouse_pos = pos_obs[0]
-        self.customer_pos_truck = pos_obs[2 + 6 :]
-        self.customer_pos_uav = pos_obs[2 + 6 + 4 :]
 
+def reshape_tsp_route(route):
+    if 0 not in route:
+        return route  # return original list if there is no 0 there (or throw an error?)
+
+    zero_index = route.index(0)  # find the index of 0 in list
+    return route[zero_index + 1:] + route[:zero_index + 1]  # reshape
+
+
+class upper_solver():
+    def __init__(self, pos_obs, 
+                 num_both_customer=10, 
+                 num_truck_customer=4, 
+                 num_uav_customer=6, 
+                 num_uavs=6) -> None:
+        
+        self.num_both_customer = num_both_customer
+        self.num_truck_customer = num_truck_customer
+        self.num_uav_customer = num_uav_customer
+        self.warehouse_pos = pos_obs[0]
+        self.num_uavs = num_uavs
+        self.customer_pos_truck = pos_obs[2 + self.num_uavs :]
+        self.customer_pos_uav = pos_obs[2 + self.num_uavs + self.num_truck_customer :]
         
     # idea 1: launch a uav to a customer point when there is a uav available, 
     # and a customer point which is closer than the suitable distance limitation from truck 
     # and start to getting further
-    def solve(self, global_obs, agent_infos, num_uavs, uav_range):
+    def solve(self, global_obs, agent_infos, uav_range):
         pos_obs = global_obs["pos_obs"]
         truck_action_masks = global_obs["truck_action_masks"]
         uav_action_masks = global_obs["uav_action_masks"]
         truck_pos = pos_obs[1]
-        uav_pos = pos_obs[2 : 2 + num_uavs]
+        uav_pos = pos_obs[2 : 2 + self.num_uavs]
+        # num_truck_customer = self.customer_pos_truck.shape[0] - self.customer_pos_uav.shape[0]
         
-        task_truck_queue = [ 0 ]
+        task_truck_queue = [ np.int64(0) ]
         task_uav_0_queue = [ -1 ]
         task_uav_1_queue = [ -1 ]
         truck_queue = []
@@ -84,9 +98,6 @@ class upper_solver():
                 elif match("uav_0", agent_info):
                     uav_0_avail_queue.append(
                         agent_info
-                        # {
-                        #     get_uav_info(agent_info)[2] : agent_info
-                        # }
                     )
                 else:
                     uav_1_avail_queue.append(agent_info)
@@ -94,9 +105,6 @@ class upper_solver():
             elif not agent_infos[agent_info] and match("uav", agent_info):
                 uav_NA_queue.append(
                     agent_info
-                    # {
-                    #     get_uav_info(agent_info)[2] : agent_info
-                    # }
                 )
                 
         # get task queue for truck
@@ -116,189 +124,261 @@ class upper_solver():
         # print(task_uav_0_queue, task_uav_1_queue)
         
         actions = {}
-        # if truck_queue:
-        #     actions.update(dict(zip([truck_queue], random.sample(task_truck_queue, len(truck_queue)))))
+        
+        # randomly assigned task to uav and truck in loop, and update the queue 
+        # to avoid the same task being repeatedly assigned among different agents
         for uav in uav_0_avail_queue:
             if task_uav_0_queue:
                 task = random.choice(task_uav_0_queue)
                 actions[uav] = task
-                if task in task_truck_queue:
-                    task_truck_queue.remove(task)
-                task_uav_0_queue.remove(task)
-                if task in task_uav_1_queue:
-                    task_uav_1_queue.remove(task)
+                # empty action should always be kept in queue
+                if task != -1:
+                    # if task in task_truck_queue:
+                    task_truck_queue.remove(task + 1 + self.num_truck_customer)
+                    task_uav_0_queue.remove(task)
+                    if task in task_uav_1_queue:
+                        task_uav_1_queue.remove(task)
         for uav in uav_1_avail_queue:
             if task_uav_1_queue:
                 task = random.choice(task_uav_1_queue)
                 actions[uav] = task
-                if task in task_truck_queue:
-                    task_truck_queue.remove(task)
-                if task in task_uav_0_queue:
-                    task_uav_0_queue.remove(task)
-                task_uav_1_queue.remove(task)
+                if task != -1:
+                    # if task in task_truck_queue:
+                    task_truck_queue.remove(task + 1 + self.num_truck_customer)
+                    if task in task_uav_0_queue:
+                        task_uav_0_queue.remove(task)
+                    task_uav_1_queue.remove(task)
         for truck in truck_queue:
             if task_truck_queue:
                 task = random.choice(task_truck_queue)
                 actions[truck] = task
                 task_truck_queue.remove(task)
-                if task in task_uav_0_queue:
-                    task_uav_0_queue.remove(task)
-                if task in task_uav_1_queue:
-                    task_uav_1_queue.remove(task)
+                if (task - 1 - self.num_truck_customer) in task_uav_0_queue:
+                    task_uav_0_queue.remove((task - 1 - self.num_truck_customer))
+                if (task - 1 - self.num_truck_customer) in task_uav_1_queue:
+                    task_uav_1_queue.remove((task - 1 - self.num_truck_customer))
                     
         return actions
 
+    # no action should not be removed from queue, so does solve()
+    def solve_greedy(self, global_obs, agent_infos, uav_range):
+        pos_obs = global_obs["pos_obs"]
+        truck_action_masks = global_obs["truck_action_masks"]
+        uav_action_masks = global_obs["uav_action_masks"]
+        truck_pos = pos_obs[1]
+        uav_pos = pos_obs[2 : 2 + self.num_uavs]
+        # num_truck_customer = self.customer_pos_truck.shape[0] - self.customer_pos_uav.shape[0]
+        
+        task_truck_queue = [ np.int64(0) ]
+        # no action as the last action(could be remove)
+        task_uav_0_queue = [ -1 ]
+        task_uav_1_queue = [ -1 ]
+        truck_queue = []
+        uav_0_avail_queue = []
+        uav_1_avail_queue = []
+        uav_NA_queue = []
+        
+        for agent_info in agent_infos:
+            if agent_infos[agent_info]:
+                if match("truck", agent_info):
+                    truck_queue.append(agent_info)
+                elif match("uav_0", agent_info):
+                    uav_0_avail_queue.append(
+                        agent_info
+                    )
+                else:
+                    uav_1_avail_queue.append(agent_info)
+                    
+            elif not agent_infos[agent_info] and match("uav", agent_info):
+                uav_NA_queue.append(
+                    agent_info
+                )
+                
+        # get the indice of ordered task distance queue from truck
+        task_dists = np.zeros(self.customer_pos_truck.shape[0])
+        for i in range(self.customer_pos_truck.shape[0]): 
+            task_dists[i] = np.sqrt(np.sum(np.square(truck_pos - self.customer_pos_truck[i])))
+        task_dists_order = np.argsort(task_dists)
+        # uav_task_dists = task_dists[ -self.customer_pos_uav.shape[0] : ]
+        
+        truck_task_dists = task_dists[ : self.num_truck_customer + self.num_both_customer]
+        both_task_dists = task_dists[self.num_truck_customer : self.num_truck_customer + self.num_both_customer]
+        uav_task_dists = task_dists[self.num_truck_customer + self.num_both_customer : ]
+        
+        truck_task_dists_order = np.argsort(truck_task_dists)
+        both_task_dists_order = np.argsort(both_task_dists)
+        uav_task_dists_order = np.argsort(uav_task_dists)
+        
+        truck_task_dists_order = np.concatenate([truck_task_dists_order, 
+                                                #  both_task_dists_order + self.num_truck_customer, 
+                                                 uav_task_dists_order + self.num_truck_customer + self.num_both_customer])
+        uav_task_dists_order = np.concatenate([uav_task_dists_order + self.num_both_customer, 
+                                               both_task_dists_order])
+        
+        uav_task_dists = task_dists[self.num_truck_customer : ]
+        # uav_task_dists_order = np.argsort(uav_task_dists)
+        # print("uav TD: ", task_dists[ -self.customer_pos_uav.shape[0] : ])
+        # print("TD: ", task_dists)
+        # print("order: ", task_dists_order)
+        # print("truck order: ", truck_task_dists_order, "uav order; ", uav_task_dists_order)
+        # print("TC: ", truck_c_dists, "BC: ", both_c_dists, "UC: ", uav_c_dists)
+          
+        # get task queue for truck
+        for idx in np.flip(truck_task_dists_order): # truck_task_dists_order[::-1]
+            if truck_action_masks[idx]:
+                task_truck_queue.append(idx + 1)
+        
+        # get task queue for uav
+        for idx in np.flip(uav_task_dists_order): 
+            if uav_task_dists[idx] < uav_range[0] * 0.1 and uav_action_masks[0][idx]:
+                task_uav_0_queue.append(idx)
+            if uav_task_dists[idx] < uav_range[1] * 0.1 and uav_action_masks[1][idx]:
+                task_uav_1_queue.append(idx)
+        
+        # task_uav_0_queue.append(-1)
+        # task_uav_1_queue.append(-1)
+        
+        # print("wh:", self.warehouse_pos, "truck:", self.customer_pos_truck, "uav:", self.customer_pos_uav)
+        # print(truck_queue, uav_0_avail_queue, uav_1_avail_queue, uav_NA_queue, task_truck_queue)
+        # print(task_uav_0_queue, task_uav_1_queue)
+        
+        actions = {}
+        
+        # assigned the shortest customer point in available task queue to available agent
+        for uav in uav_0_avail_queue:
+            if task_uav_0_queue:
+                task = task_uav_0_queue.pop()
+                actions[uav] = task
+                if task != -1:
+                    # if task in task_truck_queue:
+                    task_truck_queue.remove(task + 1 + self.num_truck_customer)
+                    if task in task_uav_1_queue:
+                        task_uav_1_queue.remove(task)
+                else:
+                    task_uav_0_queue.append(-1)
+        for uav in uav_1_avail_queue:
+            if task_uav_1_queue:
+                task = task_uav_1_queue.pop()
+                actions[uav] = task
+                if task != -1:
+                    # if task in task_truck_queue:
+                    task_truck_queue.remove(task + 1 + self.num_truck_customer)
+                    if task in task_uav_0_queue:
+                        task_uav_0_queue.remove(task)
+                else:
+                    task_uav_1_queue.append(-1)
+        for truck in truck_queue:
+            if task_truck_queue:
+                task = task_truck_queue.pop()
+                actions[truck] = task
+                if (task - 1 - self.num_truck_customer) in task_uav_0_queue:
+                    task_uav_0_queue.remove((task - 1 - self.num_truck_customer))
+                if (task - 1 - self.num_truck_customer) in task_uav_1_queue:
+                    task_uav_1_queue.remove((task - 1 - self.num_truck_customer))
+        
+        # print(actions)
+        return actions
+
+
+# probably we need to implement the marl algorithm by ourselves :(
+# class PPO():
+#     def __init__(self) -> None:
+#         pass
+
 
 if __name__ == "__main__":
+    
+    seed = 20_021_122
+    
+    step_len = 2
+    # uav parameters
+    # unit here is m/s
+    truck_velocity = 4
+    uav_velocity = np.array([12, 29])
+    # unit here is kg
+    uav_capacity = np.array([10, 3.6])
+    # unit here is m
+    uav_range = np.array([10_000, 15_000])
+    uav_obs_range = 150
+    
+    num_truck = 1
+    num_uavs_0 = 2
+    num_uavs_1 = 4
+    num_uavs = num_uavs_0 + num_uavs_1
+    
+    # parcels parameters
+    num_parcels = 40
+    num_parcels_truck = 10
+    num_parcels_uav = 15
+    num_customer_truck = num_parcels - num_parcels_uav
+    num_customer_uav = num_parcels - num_parcels_truck
+    num_customer_both = num_parcels - num_parcels_truck - num_parcels_uav
+    weight_probabilities = [0.8, 0.1, 0.1]
+    
+    # map parameters
+    map_size = 10_000 # m as unit here
+    grid_edge = 125 # m as unit here
+    
+    # obstacle parameters
+    num_uav_obstacle = 1
+    num_no_fly_zone = 1
+    
+    env = DeliveryEnvironmentWithObstacle(
+        step_len=step_len, 
+        truck_velocity=truck_velocity, 
+        uav_velocity=uav_velocity, 
+        uav_capacity=uav_capacity, 
+        uav_range=uav_range, 
+        uav_obs_range=uav_obs_range, 
+        num_truck=num_truck, 
+        num_uavs=num_uavs, 
+        num_uavs_0=num_uavs_0, 
+        num_uavs_1=num_uavs_1, 
+        num_parcels=num_parcels, 
+        num_parcels_truck=num_parcels_truck, 
+        num_parcels_uav=num_parcels_uav, 
+        num_uav_obstacle=num_uav_obstacle, 
+        num_no_fly_zone=num_no_fly_zone, 
+        render_mode="human"
+    )
+    model_path = os.path.join("training", "models", "best_model_SAC_20K")
+    model = SAC.load(model_path)
+    
+    # randList = [99112, 39566, 26912, 97613, 100615, 91316, 91792, 50701, 83019, 112200, 47254, 78875, 38088, 21103, 44819]
+    # for i in range(10):
+    # 47899, 108221, 103327, 12512, 65758
+    # seed = random.randint(1, 114_514)
+    seed = 32_571
+    print(seed)
+    observations, infos = env.reset(seed=seed)
+    delivery_upper_solver = upper_solver(observations["truck"]["pos_obs"], num_customer_both, num_parcels_truck, num_parcels_uav, num_uavs)
 
+    TA_Scheduling_action = delivery_upper_solver.solve_greedy(observations["truck"], infos, uav_range)
+    env.TA_Scheduling(TA_Scheduling_action)
+    observations, rewards, terminations, truncations, infos = env.step({})
     
-    # env = DeliveryEnvironment(render_mode="human")
-    
-    # print(np.row_stack([[0, 0], np.ones(2), np.zeros([5, 2])]))
-    # print([[0, 0], np.ones(2), np.zeros([5, 2])])
-    
-    # b = [1, 2]
-    # a = 3
-    # print(b + [a])
-    
-    # possible_agents = ["truck", 
-    #                         "uav_0_0", "uav_0_1", 
-    #                         "uav_1_0", "uav_1_1", 
-    #                         "uav_1_2", "uav_1_3", 
-    #                         ]
-    # uav_velocity = np.array([12, 29])
-    # uav_name_mapping = dict(zip([agent for agent in possible_agents if not match("truck", agent) ],
-    #                                     list(range(6))))
-    # print(uav_name_mapping)
-    # action_spaces = {
-    #     agent: (
-    #         Discrete(10 + 1) if match("truck", agent) 
-    #         else Box(low=np.array([0, 0]), high=np.array([2*np.pi, uav_velocity[get_uav_info(agent)[0]]]), dtype=np.float32)
-    #     ) 
-    #     for agent in possible_agents
-    # }
-    
-    # space = MultiDiscrete(np.array([[4, 4, 4], [4, 4, 4]]))
-    # space = Dict(
-    #     {
-    #         "surroundings": MultiBinary([3, 5, 5]), 
-    #         "coordi_info": MultiDiscrete(np.full([2, 2], 15_000 + 1))
-    #     }
-    # )
-    # space = Box(low=np.array([1, 1]), high=np.array([10, 40]), dtype=float)
-    
-    # print(space.sample())
-    # print(zones_intersection(np.array([[100, 100], [100, 100]]), 150, 250, 50, 150))
-    # a = np.zeros([2, 2, 2])
-    # a[0] = 1
-    # print(a)
-    
-    # for a in action_spaces:
-    #     print(action_spaces[a])
-    
-    env = DeliveryEnvironmentWithObstacle(render_mode="human")
-    # env = UAVTrainingEnvironmentWithObstacle()
-    # parallel_api_test(env, num_cycles=1000)
-    # render_test(DeliveryEnvironmentWithObstacle)
-    
-    # print(
-    #     np.row_stack([env.truck_position, env.truck_position, 
-    #                 np.array([[env.get_uav_info(agent)[2], env.uav_velocity[env.get_uav_info(agent)[0]]], 
-    #                             [20, 75]]), 
-    #                 env.uav_position, np.array([center for center in env.uav_obstacles]), 
-    #                 env.no_fly_zones[:, :1], env.no_fly_zones[:, 1:]] for agent in env.possible_agents)
-    # )
-    # uav_obs_space = np.row_stack([[env.num_uavs, np.max(env.uav_velocity)], 
-    #                               [20, 75], 
-    #                               np.full([(1 + 1 + env.num_uavs + env.num_uav_obstacle + env.num_no_fly_zone * 2), 2], 
-    #                                       env.map_size + 1)])
-    # print(uav_obs_space)
-    # print(len(uav_obs_space))
-    # env.reset()
-    
-    # parallel_api_test(env, num_cycles=10_000)
-    
-    # arr = np.ones([2, 3, 4])
-    # print(arr.shape)
-    
-    observations, infos = env.reset()
-    delivery_upper_solver = upper_solver(observations["truck"]["observation"]["pos_obs"])
-    
-    # print(observations["uav_0_1"]["observation"]["coordi_info"])
-    # print(env.parcels_weight)
-    # # print(env.uav_battery_remaining)
-    # env.render()
-    # total_rewards = None
-    # time_step = 0
-    # # for _ in range(20):
-    # #     print(type(env.action_space("returning_uav_1_1").sample()))
-    # # print(env.parcels_weight)
-    # # for agent_obs in observations:
-    # #     print(observations[agent_obs]["action_mask"])
-    # for agent_obs in observations:
-    #     if match("truck", agent_obs):
-    #         print(observations[agent_obs]) 
-    # TA_Scheduling_action = delivery_upper_solver.solve(observations["truck"]["observation"], infos, env.num_uavs, env.uav_range)
-    # print(observations["uav_0_1"])
-    # np.savetxt("obs.txt", np.row_stack([observations[agent_obs]["observation"]["surroundings"][0] for agent_obs in observations if match("uav", agent_obs)]))
-    
-    for i in range(150):
+    for i in range(20):
         # this is where you would insert your policy
-        if infos["truck"] or (i % 6 == 0):
-            TA_Scheduling_action = delivery_upper_solver.solve(observations["truck"]["observation"], infos, env.num_uavs, env.uav_range)
-            # print(TA_Scheduling_action)
+        if infos["truck"] or (i % 6 == 5):
+            TA_Scheduling_action = delivery_upper_solver.solve_greedy(observations["truck"], infos, uav_range)
             env.TA_Scheduling(TA_Scheduling_action)
-        
+
         actions = {
             # here is situated the policy
-            # agent: (sample_action(env, observations, agent) if infos[agent]["IsReady"] == True and not match("return", agent)
-            #         else env.action_space(agent).sample() if infos[agent]["IsReady"] == True and match("return", agent)
-            #         else None)
-            # agent: (sample_action(env, observations, agent) if infos[agent]["IsReady"] == True and not match("uav", agent)
-            #         else env.action_space(agent).sample() if infos[agent]["IsReady"] == True and match("uav", agent)
-            #         else None)
-            agent: sample_action(env, observations, agent)
-            for agent in env.agents
+            # agent: sample_action(env, observations, agent)
+            agent: model.predict(observations[agent], deterministic=True)[0]
+            for agent in env.agents if match("uav", agent) #  and not infos[agent]
         }
+        # print(actions)
         observations, rewards, terminations, truncations, infos = env.step(actions)
-        # env.render()
-        # print(observations["uav_0_1"]["observation"]["coordi_info"])
+        
+        if not env.agents:
+            print("finish in : ", i)
+            break
+        # if i % 10 == 0:
+        #     env.render()
 
-        
-        
-    #     # if rewards["Global"] != -1:
-    #     #     print("rewards: " + str(rewards["Global"]))
-        
-    #     if time_step <= 100:
-    #         env.render()
-        
-    #     time_step += 1
-    
-    # env.close()
-    # # for agent_obs in observations:
-    # #     print(observations[agent_obs]["action_mask"])
-    print("pass")
-    # print(observations["uav_0_1"]["observation"]["coordi_info"])
-    # np.savetxt("obs.txt", np.row_stack([observations[agent_obs]["observation"]["surroundings"][0] for agent_obs in observations if match("uav", agent_obs)]))
-    # time.sleep(5)
-    # print(total_rewards)
+    # print("pass")
+
     env.close()
 
-    # # Pre-process using SuperSuit
-    # print(f"Starting training on {str(env.metadata['name'])}.")
-    
-    # # env = parallel_to_aec(env)
-    # env = ss.pettingzoo_env_to_vec_env_v1(env)
-    # env = ss.concat_vec_envs_v1(env, 8, num_cpus=2, base_class="stable_baselines3")
-    
-    # model = PPO("MlpPolicy", env, verbose=1, tensorboard_log=log_path, batch_size=256)
-    
-    # model.learn(total_timesteps=100_000)
-    
-    # model.save(f"{env.unwrapped.metadata.get('name')}_{time.strftime('%Y%m%d-%H%M%S')}")
-
-    # print("Model has been saved.")
-
-    # print(f"Finished training on {str(env.unwrapped.metadata['name'])}.")
-
-    # env.close()

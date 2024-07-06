@@ -20,11 +20,12 @@ DIST_RESTRICT_OBSTACLE = 75
 # rewards in various situations
 REWARD_DELIVERY = 20
 REWARD_VICTORY = 100
-REWARD_UAV_WRECK = -50
-REWARD_UAV_VIOLATE = -50
-REWARD_UAV_ARRIVAL = 5
-REWARD_URGENCY = -0.2
-REWARD_APPROUCHING = 0.01 # get REWARD_APPROUCHING when get closer to target
+REWARD_UAV_WRECK = -2
+REWARD_UAV_VIOLATE = -2
+REWARD_UAV_ARRIVAL = 20
+REWARD_URGENCY = -0.1
+REWARD_APPROUCHING = 0.02 # get REWARD_APPROUCHING when get closer to target
+REWARD_OBSTACLE_AVOIDANCE = -2e-4 # to encourage agents to keep themselves away from obstacles
 REWARD_SLOW = -0.02
 # color used when rendering no-fly zones and obstacles
 COLOR_RESTRICTION = (255, 122, 122)
@@ -203,6 +204,9 @@ class DeliveryEnvironmentWithObstacle(ParallelEnv):
         # The main difference is the size of the range.
         self.no_fly_zones = None
         self.uav_obstacles = None
+        # uav_positions_transfer stores the first and last coordinates of uavs moving at current step, 
+        # which is used to detect path intersections and determine conflicts between uavs.
+        self.uav_positions_transfer = None
         
         # 1(warehouse) + 1(truck itself)
         ###########################################################################################
@@ -352,11 +356,31 @@ class DeliveryEnvironmentWithObstacle(ParallelEnv):
         
         return False
     
+    def uav_tjcs_intersect(self, src_pos, dst_pos):
+        uav_names = []
+        for this_start_pos, this_end_pos, uav_name in self.uav_positions_transfer:
+            # cross product check
+            # ignore the case of cross * cross == 0, 
+            # which may means that the line segments are on the same line
+            # but not happened here, just mention :)
+            if (
+                not np.array_equal(np.concatenate([src_pos, dst_pos]), np.concatenate([this_start_pos, this_end_pos]))
+                and
+                np.int64(cross_product_2d_array(dst_pos - src_pos, this_start_pos - src_pos)) * cross_product_2d_array(dst_pos - src_pos, this_end_pos - src_pos) <= 0 
+                and 
+                np.int64(cross_product_2d_array(this_end_pos - this_start_pos, src_pos - this_start_pos)) * cross_product_2d_array(this_end_pos - this_start_pos, dst_pos - this_start_pos) <= 0
+                ):
+                uav_names.append(uav_name)
+        
+        if uav_names:
+            return uav_names
+        
+        return False    
     # to be tested...
     def get_obs_by_uav(self, uav):
         uav_position = self.uav_position[self.uav_name_mapping[uav]]
-        uav_obs = np.ones([1, self.uav_obs_range, self.uav_obs_range], dtype=np.int8)
-        # uav_obs[0] = 1
+        uav_obs = np.zeros([3, self.uav_obs_range, self.uav_obs_range], dtype=np.int8)
+        uav_obs[0] = 1
         obs_radius = int(self.uav_obs_range / 2)
         x_offset = uav_position[0] - obs_radius
         y_offset = uav_position[1] - obs_radius
@@ -384,10 +408,21 @@ class DeliveryEnvironmentWithObstacle(ParallelEnv):
             uav_obs[0][int(intersection[0] - x_offset) : int(intersection[1] - x_offset), int(intersection[2] - y_offset) : int(intersection[3] - y_offset)] = 1
         
         # uav obs
-        for uav in self.uav_position:
-            if uav[0] < xhi and uav[0] > xlo and uav[1] < yhi and uav[1] > ylo: # to be adding: verify if uav is launching
-                # uav_obs[0][int(uav[0] - x_offset)][int(uav[1] - y_offset)] = 1
-                pass
+        boundary_max_x = uav_position[0] + obs_radius
+        boundary_max_y = uav_position[1] + obs_radius
+        boundary_min_x = uav_position[0] - obs_radius
+        boundary_min_y = uav_position[1] - obs_radius
+        for uav_no in range(self.num_uavs):
+            if self.uav_position[uav_no][0] < xhi and self.uav_position[uav_no][0] > xlo and self.uav_position[uav_no][1] < yhi and self.uav_position[uav_no][1] > ylo and self.uav_stages[uav_no] >= 0: # the uav need to be launched
+                uav_obs[1][int(self.uav_position[uav_no][0] - x_offset)][int(self.uav_position[uav_no][1] - y_offset)] = 1
+                # add the position of other observable agents’ goals 
+                # (clip into the boundary of the FOV if outside of the FOV
+                uav_target = None
+                if self.uav_stages[uav_no] == 1:
+                    uav_target = copy(self.uav_target_positions[uav_no])
+                else:
+                    uav_target = copy(self.truck_position)
+                uav_obs[2][int(np.clip(uav_target[0], boundary_min_x, boundary_max_x) - x_offset)][int(np.clip(uav_target[1], boundary_min_y, boundary_max_y) - y_offset)] = 1
         
         return uav_obs
     
@@ -397,9 +432,6 @@ class DeliveryEnvironmentWithObstacle(ParallelEnv):
         It needs to initialize the following attributes:
         - agents
         - timestamp
-        - prisoner x and y coordinates
-        - guard x and y coordinates
-        - escape x and y coordinates
         - observation
         - infos
 
@@ -455,6 +487,7 @@ class DeliveryEnvironmentWithObstacle(ParallelEnv):
         self.uav_target_positions = np.ones([self.num_uavs, 2], dtype=np.int32) * (-1)
         self.truck_target_position = np.ones(2) * -1
         self.truck_path = []
+        self.uav_positions_transfer = []
         
         # parcel weights probability distribution: 
         # <= 3.6kg: 0.8, 3.6kg - 10kg: 0.1, > 10kg: 0.1
@@ -731,6 +764,9 @@ class DeliveryEnvironmentWithObstacle(ParallelEnv):
         #     max(src_pos[1], self.uav_position[uav_no][1])
         # )
         
+        # append the first and last coordinates of the uav that has completed the movement
+        self.uav_positions_transfer.append([src_pos, copy(self.uav_position[uav_no]), uav])
+        
         for obstacle in self.uav_obstacles:
             # if insersect or not
             if self.uav_tjc_zone_intersect(obstacle, src_pos, self.uav_position[uav_no]):
@@ -739,9 +775,11 @@ class DeliveryEnvironmentWithObstacle(ParallelEnv):
             
         # check if the distance between this uav with others is less than safe distance
         # to be modified
-        for no in range(self.num_uavs):
-            if no != uav_no and np.sqrt(np.sum(np.square(self.uav_position[uav_no] - self.uav_position[no]))) < DIST_RESTRICT_UAV:
-                return no * (-1) + (-3)
+        # if no != uav_no and np.sqrt(np.sum(np.square(self.uav_position[uav_no] - self.uav_position[no]))) < DIST_RESTRICT_UAV:
+        is_intersect = self.uav_tjcs_intersect(src_pos, self.uav_position[uav_no])
+        if is_intersect:
+            # print("!!WHY YOU!!", uav, is_intersect)
+            return is_intersect
         
         for nfz in self.no_fly_zones:
             if self.uav_tjc_zone_intersect(nfz, src_pos, self.uav_position[uav_no]):
@@ -803,8 +841,13 @@ class DeliveryEnvironmentWithObstacle(ParallelEnv):
         
         self.denormalize_action(actions)
         
+        # only the transfer of uav position infos in the current step is retained in uav_positions_transfer
+        self.uav_positions_transfer = []
+        # contains the name of the uav in which the uav-uav path collision occurred
+        uav_collision_set = set()
+        
         rewards = {
-            agent: REWARD_URGENCY for agent in self.agents if match("uav", agent)
+            agent: REWARD_URGENCY * self.step_len for agent in self.agents if match("uav", agent)
             # get -0.1 reward every transitions to encourage faster delivery
             }
         rewards["Global"] = -1
@@ -815,6 +858,8 @@ class DeliveryEnvironmentWithObstacle(ParallelEnv):
         # - Update action mask
         # - Update agent state (i.e. infos)
         # - Get the rewards including global rewards and returning rewards
+        
+        truck_position_before = copy(self.truck_position)
         
         # truck moves
         # in the first movement, a refined path needs to be generated.
@@ -848,19 +893,23 @@ class DeliveryEnvironmentWithObstacle(ParallelEnv):
         # to be complete: 
         # - Update uav coordinate
         # - Update uav state (i.e. infos)
-        # - Get the rewards including global rewards and returning rewards    
+        # - Get the rewards including global rewards and returning rewards
+        positions_before = copy(self.uav_position)
         for agent in actions: 
             if match("uav", agent): # stage == -1 means unlaunched
                 uav_no = self.uav_name_mapping[agent]
                 if self.uav_stages[self.uav_name_mapping[agent]] != -1:
+                    rewards[agent] += max((self.uav_velocity * 0.4) - actions[agent][1], 0) * REWARD_SLOW
+                    
                     uav_moving_result = self.uav_move(agent, actions[agent])
                     
-                    if self.uav_battery_remaining[uav_no] <= 0:
-                        # that means uav's battery died and uav wrecked
-                        self.agents.remove(agent)
-                        # self.dead_agent_list.append(agent)
-                        self.infos.pop(agent)
-                        rewards["Global"] += REWARD_UAV_WRECK
+                    # uav's dead battery to be complete, not process for now
+                    # if self.uav_battery_remaining[uav_no] <= 0:
+                    #     # that means uav's battery died and uav wrecked
+                    #     self.agents.remove(agent)
+                    #     # self.dead_agent_list.append(agent)
+                    #     self.infos.pop(agent)
+                    #     # rewards["Global"] += REWARD_UAV_WRECK
                     if uav_moving_result == 1:
                         self.uav_stages[uav_no] -= 1
                         if self.uav_stages[uav_no] == -1:
@@ -875,17 +924,43 @@ class DeliveryEnvironmentWithObstacle(ParallelEnv):
                         rewards[agent] += REWARD_UAV_ARRIVAL
                     elif uav_moving_result == -1:
                         rewards[agent] += REWARD_UAV_VIOLATE
+                        self.uav_position[uav_no] = positions_before[uav_no]
                     elif uav_moving_result == -2:
-                        self.agents.remove(agent)
+                        # give negative reward without removing uav to improve training stability
+                        # self.agents.remove(agent)
                         # self.dead_agent_list.append(agent)
-                        self.infos.pop(agent)
+                        # self.infos.pop(agent)
                         rewards[agent] += REWARD_UAV_WRECK
-                    else: # uav-and-uav collision case, to be complete...
-                        pass
+                        self.uav_position[uav_no] = positions_before[uav_no]
+                    elif uav_moving_result == 0:
+                        # calculate the distance before the uav moves, 
+                        # to calculate the reward for the distance change of the uav movement
+                        uav_target = None
+                        uav_target_before = None
+                        if self.uav_stages[uav_no] == 1:
+                            uav_target = copy(self.uav_target_positions[uav_no])
+                            uav_target_before = copy(self.uav_target_positions[uav_no])
+                        else:
+                            uav_target = copy(self.truck_position)
+                            uav_target_before = truck_position_before
+                        dist_before = np.sqrt(np.sum(np.square(positions_before[uav_no] - uav_target_before)))
+                        dist_diff = dist_before - np.sqrt(np.sum(np.square(self.uav_position[uav_no] - uav_target)))
+                        rewards[agent] += REWARD_APPROUCHING * dist_diff
+                    else: # uav-and-uav collision case
+                        # rewards[agent] += REWARD_UAV_WRECK
+                        uav_collision_set.add(agent)
+                        self.uav_position[uav_no] = positions_before[uav_no]
+                        for this_uav_name in uav_moving_result:
+                            uav_collision_set.add(this_uav_name)
+                            this_uav_no = self.uav_name_mapping[this_uav_name]
+                            self.uav_position[this_uav_no] = positions_before[this_uav_no]
                     
                 else:
                     self.uav_position[uav_no] = copy(self.truck_position)
-
+        
+        for uav_name in uav_collision_set:
+            rewards[uav_name] += REWARD_UAV_WRECK
+        # print(self.uav_positions_transfer)
         # Check termination conditions
         ####
         terminations = {a: False for a in self.agents}
@@ -925,7 +1000,7 @@ class DeliveryEnvironmentWithObstacle(ParallelEnv):
                         np.array([0, 0]) if self.uav_stages[self.uav_name_mapping[agent]] == 1
                         else self.truck_target_position - self.truck_position
                     )
-                 ]
+                ]
             )
             for agent in self.agents if match("uav", agent)
         }

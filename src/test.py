@@ -2,14 +2,20 @@ import os
 import numpy as np
 from re import match, findall
 import random
-from itertools import combinations
 from env.delivery_env_with_obstacle import DeliveryEnvironmentWithObstacle
-# from env.uav_env import UAVTrainingEnvironmentWithObstacle
-from stable_baselines3 import SAC
+
+# from stable_baselines3 import SAC
+from ray.rllib.algorithms.sac import SACConfig, SAC
+from ray.tune import register_env
+from ray.rllib.env import ParallelPettingZooEnv
+from ray.rllib.policy.policy import PolicySpec
+
 from pettingzoo.utils.env import ActionType, AgentID, ObsType, ParallelEnv
 from tsp_solver import solve_tsp
 from customer_clustering_solver import solve_drones_truck_with_parking
 import matplotlib.pyplot as plt
+from train import env_creator
+from base import CustomSACPolicyModel, CustomSACQModel
 
 MAX_INT = 100
 
@@ -245,28 +251,34 @@ class upper_solver():
         actions = {}
         
         # assigned the shortest customer point in available task queue to available agent
-        for uav in uav_0_avail_queue:
-            if task_uav_0_queue:
-                task = task_uav_0_queue.pop()
-                actions[uav] = task
-                if task != -1:
-                    # if task in task_truck_queue:
-                    task_truck_queue.remove(task + 1 + self.num_truck_customer)
-                    if task in task_uav_1_queue:
-                        task_uav_1_queue.remove(task)
-                else:
-                    task_uav_0_queue.append(-1)
-        for uav in uav_1_avail_queue:
-            if task_uav_1_queue:
-                task = task_uav_1_queue.pop()
-                actions[uav] = task
-                if task != -1:
-                    # if task in task_truck_queue:
-                    task_truck_queue.remove(task + 1 + self.num_truck_customer)
-                    if task in task_uav_0_queue:
-                        task_uav_0_queue.remove(task)
-                else:
-                    task_uav_1_queue.append(-1)
+        # make that only one uav is assigned a task at a time step
+        # to reducing conflicts between uavs
+        if uav_0_avail_queue: 
+            for uav in uav_0_avail_queue:
+                if task_uav_0_queue:
+                    task = task_uav_0_queue.pop()
+                    actions[uav] = task
+                    if task != -1:
+                        # if task in task_truck_queue:
+                        task_truck_queue.remove(task + 1 + self.num_truck_customer)
+                        if task in task_uav_1_queue:
+                            task_uav_1_queue.remove(task)
+                    else:
+                        task_uav_0_queue.append(-1)
+                    break
+        else: 
+            for uav in uav_1_avail_queue:
+                if task_uav_1_queue:
+                    task = task_uav_1_queue.pop()
+                    actions[uav] = task
+                    if task != -1:
+                        # if task in task_truck_queue:
+                        task_truck_queue.remove(task + 1 + self.num_truck_customer)
+                        if task in task_uav_0_queue:
+                            task_uav_0_queue.remove(task)
+                    else:
+                        task_uav_1_queue.append(-1)
+                    break
         for truck in truck_queue:
             if task_truck_queue:
                 task = task_truck_queue.pop()
@@ -307,9 +319,9 @@ if __name__ == "__main__":
     num_uavs = num_uavs_0 + num_uavs_1
     
     # parcels parameters
-    num_parcels = 40
-    num_parcels_truck = 10
-    num_parcels_uav = 15
+    num_parcels = 20
+    num_parcels_truck = 4
+    num_parcels_uav = 8
     num_customer_truck = num_parcels - num_parcels_uav
     num_customer_uav = num_parcels - num_parcels_truck
     num_customer_both = num_parcels - num_parcels_truck - num_parcels_uav
@@ -341,32 +353,90 @@ if __name__ == "__main__":
         num_no_fly_zone=num_no_fly_zone, 
         render_mode="human"
     )
-    model_path = os.path.join("training", "models", "best_model_SAC_20K")
-    model = SAC.load(model_path)
+    
+    # sb3 style code
+    # model_path = os.path.join("training", "models", "best_model_SAC_20K")
+    # model = SAC.load(model_path)
+    
+    # ray rllib style code
+    register_env("ma_training_env", lambda config: ParallelPettingZooEnv(env_creator(config)))
+    def policy_mapping_fn(agent_id, episode, worker, **kwargs):
+        # print("worker: ", worker)
+        # print("episode: ", episode)
+        if agent_id.startswith("uav"):
+            return "mappo_policy"
+        else:
+            raise ValueError("Unknown agent type: ", agent_id)
+    config = (
+        SACConfig()
+        .environment('ma_training_env')
+        .env_runners(
+            num_env_runners=4, 
+            num_cpus_per_env_runner=2, 
+            rollout_fragment_length='auto'
+        )
+        # .rollouts(num_rollout_workers=4, rollout_fragment_length=128) # deprecated, use env_runners instead、
+        .experimental(
+            _disable_preprocessor_api=True
+        )
+        .framework('torch')
+        .checkpointing(export_native_model_files=True)
+        .training(
+            policy_model_config = {
+                "custom_model": CustomSACPolicyModel,  # Use this to define custom Q-model(s).
+            },
+            q_model_config = {
+                "custom_model": CustomSACQModel,  # Use this to define custom Q-model(s).
+            },
+            gamma=0.99, 
+            lr=0.0003,
+            train_batch_size=256, 
+            num_steps_sampled_before_learning_starts=1_000, 
+            )
+        .multi_agent(
+            policies={
+                "mappo_policy": PolicySpec(
+                policy_class=None,  # infer automatically from Algorithm
+                observation_space=None,  # infer automatically from env
+                action_space=None,  # infer automatically from env
+                config={},  # use main config plus <- this override here
+                ),
+            },
+            policy_mapping_fn=policy_mapping_fn
+        )
+        .resources(num_gpus=0)
+        )
+    masac_agent = SAC(config=config)
+    masac_agent.restore('training/models/SAC_best_checkpoint_000124')
     
     # randList = [99112, 39566, 26912, 97613, 100615, 91316, 91792, 50701, 83019, 112200, 47254, 78875, 38088, 21103, 44819]
     # for i in range(10):
     # 47899, 108221, 103327, 12512, 65758
-    # seed = random.randint(1, 114_514)
-    seed = 32_571
+    seed = random.randint(1, 114_514)
+    # seed = 35_500
     print(seed)
     observations, infos = env.reset(seed=seed)
     delivery_upper_solver = upper_solver(observations["truck"]["pos_obs"], num_customer_both, num_parcels_truck, num_parcels_uav, num_uavs)
 
     TA_Scheduling_action = delivery_upper_solver.solve_greedy(observations["truck"], infos, uav_range)
     env.TA_Scheduling(TA_Scheduling_action)
+    # print(TA_Scheduling_action)
     observations, rewards, terminations, truncations, infos = env.step({})
     
-    for i in range(20):
+    for i in range(1_000):
         # this is where you would insert your policy
-        if infos["truck"] or (i % 6 == 5):
+        if infos["truck"] or (i % 5 == 4):
             TA_Scheduling_action = delivery_upper_solver.solve_greedy(observations["truck"], infos, uav_range)
+            # print(TA_Scheduling_action)
             env.TA_Scheduling(TA_Scheduling_action)
 
         actions = {
             # here is situated the policy
             # agent: sample_action(env, observations, agent)
-            agent: model.predict(observations[agent], deterministic=True)[0]
+            agent: masac_agent.compute_single_action(
+                observation=observations[agent], 
+                policy_id='mappo_policy'
+            )
             for agent in env.agents if match("uav", agent) #  and not infos[agent]
         }
         # print(actions)
@@ -375,8 +445,8 @@ if __name__ == "__main__":
         if not env.agents:
             print("finish in : ", i)
             break
-        # if i % 10 == 0:
-        #     env.render()
+        if i % 5 == 0:
+            env.render()
 
     # print("pass")
 

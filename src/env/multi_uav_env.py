@@ -14,7 +14,6 @@ MAX_INT = 2**20
 INVALID_ANGLE = 10
 # When the distance between the returning uav and the truck is less than this threshold, 
 # the return is considered complete.
-DIST_THRESHOLD = 50
 DIST_RESTRICT_UAV = 20
 DIST_RESTRICT_OBSTACLE = 75
 # rewards in various situations
@@ -82,6 +81,10 @@ class MultiUAVsTrainingEnvironmentWithObstacle(ParallelEnv):
         self.MAX_STEP = MAX_STEP
         self.step_len = step_len
         self.time_step = 0
+        self.curriculum_reservation = -1
+        self.curriculum = None
+        self.dist_threshold = 50
+        self.generative_range = 750 #  + int(self.RNG.integers(1, 4) / 4) * 1000
         
         # uav parameters
         # unit here is m/s
@@ -98,6 +101,7 @@ class MultiUAVsTrainingEnvironmentWithObstacle(ParallelEnv):
         self.num_uavs = num_uavs
         self.num_uavs_0 = num_uavs_0
         self.num_uavs_1 = num_uavs_1
+        
         
         # map parameters
         self.map_size = 5_000 # m as unit here
@@ -371,18 +375,18 @@ class MultiUAVsTrainingEnvironmentWithObstacle(ParallelEnv):
         # All customer points are distributed at the edge of the road grid
         grid_num = self.map_size / self.grid_edge
         self.truck_target_position = np.array(
-            [self.RNG.integers(0.3 * self.map_size, 0.7 * self.map_size), self.RNG.integers(0.3 * grid_num, 0.7 * grid_num)*self.grid_edge] if self.RNG.integers(0, 1, endpoint=True) 
-             else [self.RNG.integers(0.3 * grid_num, 0.7 * grid_num)*self.grid_edge, self.RNG.integers(0.3 * self.map_size, 0.7 * self.map_size)], 
+            [self.RNG.integers(0.4 * self.map_size, 0.6 * self.map_size), self.RNG.integers(0.4 * grid_num, 0.6 * grid_num)*self.grid_edge] if self.RNG.integers(0, 1, endpoint=True) 
+             else [self.RNG.integers(0.4 * grid_num, 0.6 * grid_num)*self.grid_edge, self.RNG.integers(0.4 * self.map_size, 0.6 * self.map_size)], 
              dtype=np.int32
             )
         self.truck_position = np.array(
-            [self.RNG.integers(0.3 * self.map_size, 0.7 * self.map_size), self.RNG.integers(0.3 * grid_num, 0.7 * grid_num)*self.grid_edge] if self.RNG.integers(0, 1, endpoint=True) 
-             else [self.RNG.integers(0.3 * grid_num, 0.7 * grid_num)*self.grid_edge, self.RNG.integers(0.3 * self.map_size, 0.7 * self.map_size)], 
+            [self.RNG.integers(0.4 * self.map_size, 0.6 * self.map_size), self.RNG.integers(0.4 * grid_num, 0.6 * grid_num)*self.grid_edge] if self.RNG.integers(0, 1, endpoint=True) 
+             else [self.RNG.integers(0.4 * grid_num, 0.6 * grid_num)*self.grid_edge, self.RNG.integers(0.4 * self.map_size, 0.6 * self.map_size)], 
              dtype=np.int32
             )
         self.customer_position_uav = np.array(
-            [[self.RNG.integers(0.3 * self.map_size, 0.7 * self.map_size), self.RNG.integers(0.3 * grid_num, 0.7 * grid_num)*self.grid_edge] if i % 2 
-             else [self.RNG.integers(0.3 * grid_num, 0.7 * grid_num)*self.grid_edge, self.RNG.integers(0.3 * self.map_size, 0.7 * self.map_size)] 
+            [[self.RNG.integers(0.4 * self.map_size, 0.6 * self.map_size), self.RNG.integers(0.4 * grid_num, 0.6 * grid_num)*self.grid_edge] if i % 2 
+             else [self.RNG.integers(0.4 * grid_num, 0.6 * grid_num)*self.grid_edge, self.RNG.integers(0.4 * self.map_size, 0.6 * self.map_size)] 
              for i in range(self.num_uavs)], dtype=np.int32
             )
 
@@ -390,15 +394,16 @@ class MultiUAVsTrainingEnvironmentWithObstacle(ParallelEnv):
         self.uav_target_positions = copy(self.customer_position_uav)
         self.uav_positions_transfer = []
         
-        generative_range = 800 #  + int(self.RNG.integers(1, 4) / 4) * 1000
-        generative_lower_bound = 150
-        # offset = np.array([self.RNG.integers(-1 * generative_range, generative_range), self.RNG.integers(-1 * generative_range, generative_range)], dtype=np.int32)
-        offset = np.array([
-            self.RNG.choice([self.RNG.integers(-1 * generative_range, -1 * generative_lower_bound), self.RNG.integers(generative_lower_bound, generative_range)]), 
-            self.RNG.choice([self.RNG.integers(-1 * generative_range, -1 * generative_lower_bound), self.RNG.integers(generative_lower_bound, generative_range)])
-        ])
-        
-        self.uav_position = self.uav_target_positions + offset
+        generative_lower_bound = 0
+        self.uav_position = copy(self.uav_target_positions)
+        # offset = np.array([self.RNG.integers(-1 * self.generative_range, self.generative_range), self.RNG.integers(-1 * self.generative_range, self.generative_range)], dtype=np.int32)
+        for uav in self.uav_position:
+            offset = np.array([
+                self.RNG.choice([self.RNG.integers(-1 * self.generative_range, -1 * generative_lower_bound), self.RNG.integers(generative_lower_bound, self.generative_range)]), 
+                self.RNG.choice([self.RNG.integers(-1 * self.generative_range, -1 * generative_lower_bound), self.RNG.integers(generative_lower_bound, self.generative_range)])
+            ])
+            
+            uav += offset
         # print("*uav positions*", self.uav_target_positions, self.uav_position)
         
         self.no_fly_zones = np.array([self.generate_no_fly_zone() for _ in range(self.num_no_fly_zone)])
@@ -440,6 +445,48 @@ class MultiUAVsTrainingEnvironmentWithObstacle(ParallelEnv):
         }
         
         return observations, infos
+    
+    
+    def reserve_curriculum(self, curri):
+        if self.curriculum_reservation == -1:
+            self.curriculum_reservation = curri
+    
+    
+    # set the difficulty of the env
+    def set_curriculum(self, curri):
+        if self.curriculum is None:
+            self.curriculum = curri
+        else:
+            self.curriculum = max(self.curriculum, curri)
+        if self.curriculum == 0:
+            self.num_uavs = 8
+            self.num_uavs_0 = 4
+            self.num_uavs_1 = 4
+            self.num_uav_obstacle = 0
+            self.num_no_fly_zone = 0
+            self.dist_threshold = 50
+            self.generative_range = 750
+        elif self.curriculum == 1:
+            self.num_uavs = 20
+            self.num_uavs_0 = 10
+            self.num_uavs_1 = 10
+            self.num_uav_obstacle = 10
+            self.num_no_fly_zone = 4
+            self.dist_threshold = 30
+            self.generative_range = 1000
+        elif self.curriculum == 2:
+            self.num_uavs = 30
+            self.num_uavs_0 = 15
+            self.num_uavs_1 = 15
+            self.num_uav_obstacle = 20
+            self.num_no_fly_zone = 6
+            self.dist_threshold = 20
+            self.generative_range = 1000
+        else:
+            raise ValueError("Unknown curriculum setting: ", curri)
+        
+        self.reset()
+    
     
     # When the truck performs a new action, it first generates a refined path through genarate_truck_path(),
     # and then moves in truck_move() according to the generated path before reaching the target 
@@ -584,7 +631,7 @@ class MultiUAVsTrainingEnvironmentWithObstacle(ParallelEnv):
         
         # when the distance between uav and target is less than a threshold
         # then consider the uav as arrival 
-        if np.sqrt(np.sum(np.square(self.uav_position[uav_no] - uav_target))) < DIST_THRESHOLD:
+        if np.sqrt(np.sum(np.square(self.uav_position[uav_no] - uav_target))) < self.dist_threshold:
             self.uav_position[uav_no] = copy(uav_target)
             return 1
         # The uav may also be returned directly to the warehouse, 
@@ -646,8 +693,8 @@ class MultiUAVsTrainingEnvironmentWithObstacle(ParallelEnv):
             # a new target point needs to be assigned to the truck before all uavs return to the truck
             grid_num = self.map_size / self.grid_edge
             self.truck_target_position = np.array(
-                [self.RNG.integers(0.3 * self.map_size, 0.7 * self.map_size), self.RNG.integers(0.3 * grid_num, 0.7 * grid_num)*self.grid_edge] if self.RNG.integers(0, 1, endpoint=True) 
-                else [self.RNG.integers(0.3 * grid_num, 0.7 * grid_num)*self.grid_edge, self.RNG.integers(0.3 * self.map_size, 0.7 * self.map_size)], 
+                [self.RNG.integers(0.4 * self.map_size, 0.6 * self.map_size), self.RNG.integers(0.4 * grid_num, 0.6 * grid_num)*self.grid_edge] if self.RNG.integers(0, 1, endpoint=True) 
+                else [self.RNG.integers(0.4 * grid_num, 0.6 * grid_num)*self.grid_edge, self.RNG.integers(0.4 * self.map_size, 0.6 * self.map_size)], 
                 dtype=np.int32
                 )                    
 
@@ -756,6 +803,25 @@ class MultiUAVsTrainingEnvironmentWithObstacle(ParallelEnv):
         # Get dummy infos (not used in this example)
         ####
         
+        if not self.agents and self.curriculum_reservation >= 0:
+            self.set_curriculum(self.curriculum_reservation)
+            self.curriculum_reservation = -1
+            print(
+                "env curriculum config has been switch to: ", 
+                {   
+                    'num_uavs_0': self.num_uavs_0, 
+                    'num_uavs_1': self.num_uavs_1, 
+                    'num_uavs': self.num_uavs, 
+                    
+                    # obstacle parameters
+                    'num_uav_obstacle': self.num_uav_obstacle, 
+                    'num_no_fly_zone': self.num_no_fly_zone, 
+                    
+                    'dist_threshold': self.dist_threshold, 
+                    'generative_range': self.generative_range, 
+                }, 
+            )
+        
         return observations, rewards, terminations, truncations, infos
 
     def render(self):
@@ -807,8 +873,8 @@ class MultiUAVsTrainingEnvironmentWithObstacle(ParallelEnv):
             uav_obstacle_image = pygame.Surface(uav_obstacle[1] / scale)
             uav_obstacle_image.fill(COLOR_OBSTACLE)
             self.screen.blit(uav_obstacle_image, uav_obstacle[0] / scale)
-        for customer in self.truck_target_position:
-            self.screen.blit(customer_truck_image, customer / scale - position_bias * 0.4)
+        
+        self.screen.blit(customer_truck_image, self.truck_target_position / scale - position_bias * 0.4)
         for customer in self.customer_position_uav:
             self.screen.blit(customer_uav_image, customer / scale - position_bias * 0.4)
         

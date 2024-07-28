@@ -22,6 +22,8 @@
 *.rar
 *.tar
 *.zip
+checkpoint*
+SAC_best*
 
 # Logs and databases #
 ######################

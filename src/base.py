@@ -428,16 +428,16 @@ class CustomCallbacks(DefaultCallbacks):
             checkpoint_path = algorithm.save(self.checkpoint_dir)
             print(f"New best mean reward: {mean_reward:.2f}. Checkpoint saved at {checkpoint_path}")
         
-        curri = algorithm._counters.get("current_env_curri", 0)
-        if mean_reward > 300 and curri < 2:
-            curri = curri + 1
-            algorithm._counters["current_env_curri"] = curri
+        # curri = algorithm._counters.get("current_env_curri", 0)
+        # if mean_reward > 300 and curri < 2:
+        #     curri = curri + 1
+        #     algorithm._counters["current_env_curri"] = curri
 
-            algorithm.workers.foreach_worker(
-                lambda ev: ev.foreach_env(
-                    lambda env: env.par_env.reserve_curriculum(curri)
-                )
-            )
-            # algorithm._counters["current_env_curri"] = curri
-            print("Curriculum has been set to: ", curri)
+        #     algorithm.workers.foreach_worker(
+        #         lambda ev: ev.foreach_env(
+        #             lambda env: env.par_env.reserve_curriculum(curri)
+        #         )
+        #     )
+        #     # algorithm._counters["current_env_curri"] = curri
+        #     print("Curriculum has been set to: ", curri)
 

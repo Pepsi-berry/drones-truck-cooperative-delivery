@@ -11,6 +11,7 @@ from ray.rllib.env import ParallelPettingZooEnv
 from ray.rllib.policy.policy import PolicySpec
 
 from pettingzoo.utils.env import ActionType, AgentID, ObsType, ParallelEnv
+# from pettingzoo.test import parallel_api_test
 from tsp_solver import solve_tsp
 from customer_clustering_solver import solve_drones_truck_with_parking
 import matplotlib.pyplot as plt
@@ -335,24 +336,27 @@ if __name__ == "__main__":
     num_uav_obstacle = 1
     num_no_fly_zone = 1
     
-    env = DeliveryEnvironmentWithObstacle(
-        step_len=step_len, 
-        truck_velocity=truck_velocity, 
-        uav_velocity=uav_velocity, 
-        uav_capacity=uav_capacity, 
-        uav_range=uav_range, 
-        uav_obs_range=uav_obs_range, 
-        num_truck=num_truck, 
-        num_uavs=num_uavs, 
-        num_uavs_0=num_uavs_0, 
-        num_uavs_1=num_uavs_1, 
-        num_parcels=num_parcels, 
-        num_parcels_truck=num_parcels_truck, 
-        num_parcels_uav=num_parcels_uav, 
-        num_uav_obstacle=num_uav_obstacle, 
-        num_no_fly_zone=num_no_fly_zone, 
-        render_mode="human"
-    )
+    # env = DeliveryEnvironmentWithObstacle(
+    #     step_len=step_len, 
+    #     truck_velocity=truck_velocity, 
+    #     uav_velocity=uav_velocity, 
+    #     uav_capacity=uav_capacity, 
+    #     uav_range=uav_range, 
+    #     uav_obs_range=uav_obs_range, 
+    #     num_truck=num_truck, 
+    #     num_uavs=num_uavs, 
+    #     num_uavs_0=num_uavs_0, 
+    #     num_uavs_1=num_uavs_1, 
+    #     num_parcels=num_parcels, 
+    #     num_parcels_truck=num_parcels_truck, 
+    #     num_parcels_uav=num_parcels_uav, 
+    #     num_uav_obstacle=num_uav_obstacle, 
+    #     num_no_fly_zone=num_no_fly_zone, 
+    #     render_mode="human"
+    # )
+    env = env_creator({
+        'render_mode': 'human'
+    })
     
     # sb3 style code
     # model_path = os.path.join("training", "models", "best_model_SAC_20K")
@@ -414,22 +418,43 @@ if __name__ == "__main__":
     # 47899, 108221, 103327, 12512, 65758
     seed = random.randint(1, 114_514)
     # seed = 35_500
-    print(seed)
-    observations, infos = env.reset(seed=seed)
-    delivery_upper_solver = upper_solver(observations["truck"]["pos_obs"], num_customer_both, num_parcels_truck, num_parcels_uav, num_uavs)
+    # print(seed)
+    # observations, infos = env.reset(seed=seed)
+    # delivery_upper_solver = upper_solver(observations["truck"]["pos_obs"], num_customer_both, num_parcels_truck, num_parcels_uav, num_uavs)
 
-    TA_Scheduling_action = delivery_upper_solver.solve_greedy(observations["truck"], infos, uav_range)
-    env.TA_Scheduling(TA_Scheduling_action)
-    # print(TA_Scheduling_action)
-    observations, rewards, terminations, truncations, infos = env.step({})
+    # TA_Scheduling_action = delivery_upper_solver.solve_greedy(observations["truck"], infos, uav_range)
+    # env.TA_Scheduling(TA_Scheduling_action)
+    # # print(TA_Scheduling_action)
+    # observations, rewards, terminations, truncations, infos = env.step({})
     
-    for i in range(1_000):
-        # this is where you would insert your policy
-        if infos["truck"] or (i % 5 == 4):
-            TA_Scheduling_action = delivery_upper_solver.solve_greedy(observations["truck"], infos, uav_range)
-            # print(TA_Scheduling_action)
-            env.TA_Scheduling(TA_Scheduling_action)
+    # for i in range(100):
+    #     # this is where you would insert your policy
+    #     if infos["truck"] or (i % 5 == 4):
+    #         TA_Scheduling_action = delivery_upper_solver.solve_greedy(observations["truck"], infos, uav_range)
+    #         # print(TA_Scheduling_action)
+    #         env.TA_Scheduling(TA_Scheduling_action)
 
+    #     actions = {
+    #         # here is situated the policy
+    #         # agent: sample_action(env, observations, agent)
+    #         agent: masac_agent.compute_single_action(
+    #             observation=observations[agent], 
+    #             policy_id='mappo_policy'
+    #         )
+    #         for agent in env.agents if match("uav", agent) #  and not infos[agent]
+    #     }
+    #     # print(actions)
+    #     observations, rewards, terminations, truncations, infos = env.step(actions)
+        
+    #     if not env.agents:
+    #         print("finish in : ", i)
+    #         break
+    #     if i % 5 == 0:
+    #         env.render()
+    
+    
+    observations, infos = env.reset(seed=seed)
+    for i in range(100):
         actions = {
             # here is situated the policy
             # agent: sample_action(env, observations, agent)
@@ -445,7 +470,7 @@ if __name__ == "__main__":
         if not env.agents:
             print("finish in : ", i)
             break
-        if i % 5 == 0:
+        if i % 2 == 0:
             env.render()
 
     # print("pass")

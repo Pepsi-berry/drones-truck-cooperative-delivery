@@ -2,9 +2,10 @@ import os
 import functools
 from copy import copy
 from re import match, findall
+# from itertools import combinations
 
 import numpy as np
-from gymnasium.spaces import Box, Discrete, MultiDiscrete, Dict, MultiBinary
+from gymnasium.spaces import Box, Dict, MultiBinary
 from gymnasium.utils import seeding
 
 from pettingzoo import ParallelEnv
@@ -22,10 +23,11 @@ REWARD_VICTORY = 100
 REWARD_UAV_WRECK = -2
 REWARD_UAV_VIOLATE = -2
 REWARD_UAV_ARRIVAL = 20
-REWARD_URGENCY = -0.1
+REWARD_URGENCY = -0.2
 REWARD_APPROUCHING = 0.02 # get REWARD_APPROUCHING when get closer to target
-REWARD_OBSTACLE_AVOIDANCE = -2e-4 # to encourage agents to keep themselves away from obstacles
-REWARD_SLOW = -0.02
+REWARD_UAVS_DANGER = float(-400) # coefficient of the penalty for being to close with other uavs
+# REWARD_OBSTACLE_AVOIDANCE = -2e-4 # to encourage agents to keep themselves away from obstacles
+# REWARD_SLOW = -0.02
 # color used when rendering no-fly zones and obstacles
 COLOR_RESTRICTION = (255, 122, 122)
 COLOR_OBSTACLE = (254, 195, 106)
@@ -304,6 +306,20 @@ class MultiUAVsTrainingEnvironmentWithObstacle(ParallelEnv):
         return False    
 
 
+    # return if the dist between uav l and r is safe through this transition
+    def uav_safe_distance_detection(self, traj_l, traj_r, num):
+        # skip the initial point
+        trajs_l = np.linspace(traj_l[1], traj_l[0], num=num, endpoint=False)
+        trajs_r = np.linspace(traj_r[1], traj_r[0], num=num, endpoint=False)
+        
+        dist_min = np.inf
+        for point_l, point_r in zip(trajs_l, trajs_r):
+            dist = np.sqrt(np.sum(np.square(point_l - point_r)))
+            dist_min = min(dist_min, dist)
+        
+        return dist_min > DIST_RESTRICT_UAV
+
+
     def get_obs_by_uav(self, uav):
         uav_position = self.uav_position[self.uav_name_mapping[uav]]
         uav_obs = np.zeros([3, self.uav_obs_range, self.uav_obs_range], dtype=np.int8)
@@ -340,7 +356,7 @@ class MultiUAVsTrainingEnvironmentWithObstacle(ParallelEnv):
         boundary_min_x = uav_position[0] - obs_radius
         boundary_min_y = uav_position[1] - obs_radius
         for uav_no in range(self.num_uavs):
-            if self.uav_position[uav_no][0] < xhi and self.uav_position[uav_no][0] > xlo and self.uav_position[uav_no][1] < yhi and self.uav_position[uav_no][1] > ylo and self.uav_stages[uav_no] >= 0: # the uav need to be launched
+            if self.uav_position[uav_no][0] < xhi and self.uav_position[uav_no][0] > xlo and self.uav_position[uav_no][1] < yhi and self.uav_position[uav_no][1] > ylo and self.uav_stages[uav_no] >= 0 and uav_no != self.uav_name_mapping[uav]: # the uav need to be launched
                 uav_obs[1][int(self.uav_position[uav_no][0] - x_offset)][int(self.uav_position[uav_no][1] - y_offset)] = 1
                 # add the position of other observable agents’ goals 
                 # (clip into the boundary of the FOV if outside of the FOV
@@ -619,11 +635,10 @@ class MultiUAVsTrainingEnvironmentWithObstacle(ParallelEnv):
                 self.uav_position[uav_no] = obstacle[0] + obstacle[1] / 2
                 return -2
             
-        # check if the distance between this uav with others is less than safe distance
-        # to be modified
-        is_intersect = self.uav_tjcs_intersect(src_pos, self.uav_position[uav_no])
-        if is_intersect:
-            return is_intersect
+        # move the collision judgment to step() and change to distance detection
+        # is_intersect = self.uav_tjcs_intersect(src_pos, self.uav_position[uav_no])
+        # if is_intersect:
+        #     return is_intersect
         
         for nfz in self.no_fly_zones:
             if self.uav_tjc_zone_intersect(nfz, src_pos, self.uav_position[uav_no]):
@@ -670,18 +685,12 @@ class MultiUAVsTrainingEnvironmentWithObstacle(ParallelEnv):
         # only the transfer of uav position infos in the current step is retained in uav_positions_transfer
         self.uav_positions_transfer = []
         # contains the name of the uav in which the uav-uav path collision occurred
-        uav_collision_set = set()
+        # uav_collision_set = set()
         
         rewards = {
             agent: REWARD_URGENCY * self.step_len for agent in self.agents
             # get -0.1 reward every transitions to encourage faster delivery
             }
-        # Execute actions
-        ####
-        # processes to be performed here include. 
-        # - Update agent coordinate
-        # - Update agent state (i.e. infos)
-        # - Get the rewards including global rewards and returning rewards
         
         truck_position_before = copy(self.truck_position)
         
@@ -713,7 +722,7 @@ class MultiUAVsTrainingEnvironmentWithObstacle(ParallelEnv):
             # stage == -1 means unlaunched
             uav_no = self.uav_name_mapping[agent]
             if self.uav_stages[self.uav_name_mapping[agent]] != -1:
-                rewards[agent] += max((self.uav_velocity[1] * 0.4) - actions[agent][1], 0) * REWARD_SLOW
+                # rewards[agent] += max((self.uav_velocity[1] * 0.4) - actions[agent][1], 0) * REWARD_SLOW
                 
                 uav_moving_result = self.uav_move(agent, actions[agent])
                 
@@ -746,19 +755,41 @@ class MultiUAVsTrainingEnvironmentWithObstacle(ParallelEnv):
                     dist_before = np.sqrt(np.sum(np.square(positions_before[uav_no] - uav_target_before)))
                     dist_diff = dist_before - np.sqrt(np.sum(np.square(self.uav_position[uav_no] - uav_target)))
                     rewards[agent] += REWARD_APPROUCHING * dist_diff
-                else: # uav-and-uav collision case
-                    uav_collision_set.add(agent)
-                    self.uav_position[uav_no] = positions_before[uav_no]
-                    for this_uav_name in uav_moving_result:
-                        uav_collision_set.add(this_uav_name)
-                        this_uav_no = self.uav_name_mapping[this_uav_name]
-                        self.uav_position[this_uav_no] = positions_before[this_uav_no]
+                # else: # uav-and-uav collision case (to be modified...)
+                #     uav_collision_set.add(agent)
+                #     self.uav_position[uav_no] = positions_before[uav_no]
+                #     for this_uav_name in uav_moving_result:
+                #         uav_collision_set.add(this_uav_name)
+                #         this_uav_no = self.uav_name_mapping[this_uav_name]
+                #         self.uav_position[this_uav_no] = positions_before[this_uav_no]
                 
             else:
                 self.uav_position[uav_no] = copy(self.truck_position)
         
-        for uav_name in uav_collision_set:
-            rewards[uav_name] += REWARD_UAV_WRECK
+        # for uav_name in uav_collision_set:
+        #     rewards[uav_name] += REWARD_UAV_WRECK
+        
+        # check if the distance between uavs is less than safe distance
+        # for traj_l, traj_r in combinations(self.uav_positions_transfer, 2):
+        #     if self.uav_safe_distance_detection(traj_l, traj_r, 1):
+        #         rewards[traj_l[-1]] += REWARD_UAV_WRECK
+        #         rewards[traj_r[-1]] += REWARD_UAV_WRECK
+        
+        # add uav-uav closing penalty, based on position gravity model
+        uavs_surrounding = {
+            uav: self.get_obs_by_uav(uav) for uav in agents_before
+        }
+        centroid_idx = int(self.uav_obs_range / 2)
+        for uav in uavs_surrounding:
+            surrounding = uavs_surrounding[uav]
+            non_zero_idx = np.transpose(np.nonzero(surrounding[1]))
+            if non_zero_idx.size != 0:
+                rewards[uav] += np.sum(REWARD_UAVS_DANGER / (np.sum(
+                    np.square(
+                        non_zero_idx - np.array([centroid_idx, centroid_idx])
+                    ), axis=1
+                ) + 50))
+        
         # Check termination conditions
         ####
         if np.sum(self.uav_stages) == (-1) * self.num_uavs or not self.agents:
@@ -794,7 +825,7 @@ class MultiUAVsTrainingEnvironmentWithObstacle(ParallelEnv):
         observations = {
             agent: 
                     dict({
-                        "surroundings" : self.get_obs_by_uav(agent), 
+                        "surroundings" : uavs_surrounding[agent], 
                         "vecs" : coordi[agent].astype(np.int32)
                     })
                     for agent in agents_before
@@ -803,24 +834,24 @@ class MultiUAVsTrainingEnvironmentWithObstacle(ParallelEnv):
         # Get dummy infos (not used in this example)
         ####
         
-        if not self.agents and self.curriculum_reservation >= 0:
-            self.set_curriculum(self.curriculum_reservation)
-            self.curriculum_reservation = -1
-            print(
-                "env curriculum config has been switch to: ", 
-                {   
-                    'num_uavs_0': self.num_uavs_0, 
-                    'num_uavs_1': self.num_uavs_1, 
-                    'num_uavs': self.num_uavs, 
+        # if not self.agents and self.curriculum_reservation >= 0:
+        #     self.set_curriculum(self.curriculum_reservation)
+        #     self.curriculum_reservation = -1
+        #     print(
+        #         "env curriculum config has been switch to: ", 
+        #         {   
+        #             'num_uavs_0': self.num_uavs_0, 
+        #             'num_uavs_1': self.num_uavs_1, 
+        #             'num_uavs': self.num_uavs, 
                     
-                    # obstacle parameters
-                    'num_uav_obstacle': self.num_uav_obstacle, 
-                    'num_no_fly_zone': self.num_no_fly_zone, 
+        #             # obstacle parameters
+        #             'num_uav_obstacle': self.num_uav_obstacle, 
+        #             'num_no_fly_zone': self.num_no_fly_zone, 
                     
-                    'dist_threshold': self.dist_threshold, 
-                    'generative_range': self.generative_range, 
-                }, 
-            )
+        #             'dist_threshold': self.dist_threshold, 
+        #             'generative_range': self.generative_range, 
+        #         }, 
+        #     )
         
         return observations, rewards, terminations, truncations, infos
 

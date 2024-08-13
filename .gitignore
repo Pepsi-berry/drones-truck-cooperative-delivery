@@ -24,6 +24,7 @@
 *.zip
 checkpoint*
 SAC_best*
+SAC_shortest*
 
 # Logs and databases #
 ######################

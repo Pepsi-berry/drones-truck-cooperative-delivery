@@ -2,6 +2,7 @@ import os
 import functools
 from copy import copy
 from re import match, findall
+from itertools import combinations
 
 import numpy as np
 from gymnasium.spaces import Box, Discrete, MultiDiscrete, Dict, MultiBinary
@@ -576,25 +577,26 @@ class DeliveryEnvironmentWithObstacle(ParallelEnv):
         # infos contain if agent is available for TA
         # if there is at least one agent(or truck?) available, then run the upper solver
         self.infos = {
-            a: True
-                # {
-                #     "IsAlive": True, 
-                #     "IsReady": True
-                # }
-            for a in self.possible_agents
-            }
+            'is_ready': {
+                a: True
+                for a in self.possible_agents
+            }, 
+            'collisions_with_obstacle': 0, 
+            'collisions_with_uav': 0
+        }
 
         return observations, self.infos
     
     # input: the actions output by the upper layer solution 
     # complete the task assignment and scheduling of the agents in the environment.
     # mask(customer) infos, target infos need to be added
+    # add: check if the truck in the restricted area
     def TA_Scheduling(self, actions):
         for agent in actions:
             action = actions[agent]
             if match("truck", agent):
                 if isinstance(action, np.int64) or isinstance(action, int):
-                    self.infos[agent] = False
+                    self.infos['is_ready'][agent] = False
                     if action == 0:
                         self.truck_target_position = copy(self.warehouse_position)
                     elif 0 < action <= self.num_parcels_truck:
@@ -606,7 +608,7 @@ class DeliveryEnvironmentWithObstacle(ParallelEnv):
                     else:
                         self.truck_target_position = copy(self.customer_position_uav[action - self.num_customer_truck - 1])
                 elif isinstance(action, np.ndarray):
-                    self.infos[agent] = False
+                    self.infos['is_ready'][agent] = False
                     idx = np.where((self.customer_position_truck == action).all(axis=1))[0]
                     if idx.size > 0:
                         self.truck_target_position = copy(action) # action = self.customer_position_truck[idx[0]]
@@ -617,7 +619,7 @@ class DeliveryEnvironmentWithObstacle(ParallelEnv):
             elif match("uav", agent):
                 uav_no = self.uav_name_mapping[agent]
                 if self.uav_stages[uav_no] == -1 and action != -1:
-                    self.infos[agent] = False
+                    self.infos['is_ready'][agent] = False
                     self.uav_masks[action] = 0
                     self.uav_stages[uav_no] = 1
                     if action < self.num_customer_both:
@@ -708,6 +710,8 @@ class DeliveryEnvironmentWithObstacle(ParallelEnv):
         # print("current: ", self.truck_position)
         # print("path: ", self.truck_path)
     
+    
+    # bug check
     def truck_move(self):
         # target point x, y coordinate
         time_left = self.step_len
@@ -731,6 +735,7 @@ class DeliveryEnvironmentWithObstacle(ParallelEnv):
             return True
         else:
             return False
+    
     
     # obstacle judgement is to be added...
     # update the location of uav and return the result of movement
@@ -804,6 +809,7 @@ class DeliveryEnvironmentWithObstacle(ParallelEnv):
             # print("uav not arrive!")
             return 0
         
+        
     def update_action_mask(self, agent, action):
         # if match("truck", agent):
         #     if action != 0:
@@ -811,6 +817,20 @@ class DeliveryEnvironmentWithObstacle(ParallelEnv):
         # else:
         #     self.uav_masks[action] = 0
         pass
+    
+    
+    # return if the dist between uav l and r is safe through this transition
+    def uav_safe_distance_detection(self, traj_l, traj_r, num):
+        # skip the initial point
+        trajs_l = np.linspace(traj_l[1], traj_l[0], num=num, endpoint=False)
+        trajs_r = np.linspace(traj_r[1], traj_r[0], num=num, endpoint=False)
+        
+        dist_min = np.inf
+        for point_l, point_r in zip(trajs_l, trajs_r):
+            dist = np.sqrt(np.sum(np.square(point_l - point_r)))
+            dist_min = min(dist_min, dist)
+        
+        return dist_min > DIST_RESTRICT_UAV
     
     
     # Convert the normalized action back to the range of the original action distribution
@@ -844,7 +864,10 @@ class DeliveryEnvironmentWithObstacle(ParallelEnv):
         # only the transfer of uav position infos in the current step is retained in uav_positions_transfer
         self.uav_positions_transfer = []
         # contains the name of the uav in which the uav-uav path collision occurred
-        uav_collision_set = set()
+        # uav_collision_set = set()
+        # collision infos only in the current step
+        self.infos['collisions_with_obstacle'] = 0
+        self.infos['collisions_with_uav'] = 0
         
         rewards = {
             agent: REWARD_URGENCY * self.step_len for agent in self.agents if match("uav", agent)
@@ -877,12 +900,12 @@ class DeliveryEnvironmentWithObstacle(ParallelEnv):
                 idx = np.where((self.customer_position_uav == self.truck_target_position).all(axis=1))[0]
                 if idx.size:
                     self.uav_masks[idx[0] + self.num_customer_both] = 0
-            self.infos["truck"] = True
+            self.infos['is_ready']["truck"] = True
             # calculate reward when arriving to target
             if np.array_equal(self.truck_position, self.warehouse_position):
                 if np.count_nonzero(self.action_masks) == 2:
                     rewards["truck"] += REWARD_VICTORY
-                    self.infos.pop("truck")
+                    self.infos['is_ready'].pop("truck")
                     # self.agents.remove("truck")
                     self.agents = []
             else:
@@ -913,11 +936,11 @@ class DeliveryEnvironmentWithObstacle(ParallelEnv):
                     if uav_moving_result == 1:
                         self.uav_stages[uav_no] -= 1
                         if self.uav_stages[uav_no] == -1:
-                            self.infos[agent] = True
+                            self.infos['is_ready'][agent] = True
                             # charging after returning completion
                             self.uav_battery_remaining[uav_no] = self.uav_range[self.get_uav_info(agent)[0]]
                             if np.array_equal(self.uav_target_positions[uav_no], self.truck_target_position):
-                                self.infos["truck"] = True
+                                self.infos['is_ready']["truck"] = True
                                 self.truck_path.clear()
                         # else:
                         #     self.uav_target_positions[uav_no] = self.truck_position
@@ -925,6 +948,7 @@ class DeliveryEnvironmentWithObstacle(ParallelEnv):
                     elif uav_moving_result == -1:
                         rewards[agent] += REWARD_UAV_VIOLATE
                         self.uav_position[uav_no] = positions_before[uav_no]
+                        self.infos['collisions_with_obstacle'] += 1
                     elif uav_moving_result == -2:
                         # give negative reward without removing uav to improve training stability
                         # self.agents.remove(agent)
@@ -932,6 +956,7 @@ class DeliveryEnvironmentWithObstacle(ParallelEnv):
                         # self.infos.pop(agent)
                         rewards[agent] += REWARD_UAV_WRECK
                         self.uav_position[uav_no] = positions_before[uav_no]
+                        self.infos['collisions_with_obstacle'] += 1
                     elif uav_moving_result == 0:
                         # calculate the distance before the uav moves, 
                         # to calculate the reward for the distance change of the uav movement
@@ -946,20 +971,28 @@ class DeliveryEnvironmentWithObstacle(ParallelEnv):
                         dist_before = np.sqrt(np.sum(np.square(positions_before[uav_no] - uav_target_before)))
                         dist_diff = dist_before - np.sqrt(np.sum(np.square(self.uav_position[uav_no] - uav_target)))
                         rewards[agent] += REWARD_APPROUCHING * dist_diff
-                    else: # uav-and-uav collision case
-                        # rewards[agent] += REWARD_UAV_WRECK
-                        uav_collision_set.add(agent)
-                        self.uav_position[uav_no] = positions_before[uav_no]
-                        for this_uav_name in uav_moving_result:
-                            uav_collision_set.add(this_uav_name)
-                            this_uav_no = self.uav_name_mapping[this_uav_name]
-                            self.uav_position[this_uav_no] = positions_before[this_uav_no]
+                    # else: # uav-and-uav collision case
+                    #     # rewards[agent] += REWARD_UAV_WRECK
+                    #     uav_collision_set.add(agent)
+                    #     self.uav_position[uav_no] = positions_before[uav_no]
+                    #     for this_uav_name in uav_moving_result:
+                    #         uav_collision_set.add(this_uav_name)
+                    #         this_uav_no = self.uav_name_mapping[this_uav_name]
+                    #         self.uav_position[this_uav_no] = positions_before[this_uav_no]
                     
                 else:
                     self.uav_position[uav_no] = copy(self.truck_position)
         
-        for uav_name in uav_collision_set:
-            rewards[uav_name] += REWARD_UAV_WRECK
+        # for uav_name in uav_collision_set:
+        #     rewards[uav_name] += REWARD_UAV_WRECK
+
+        # check if the distance between uavs across this step is less than safe distance
+        for traj_l, traj_r in combinations(self.uav_positions_transfer, 2):
+            if not self.uav_safe_distance_detection(traj_l, traj_r, 10):
+                self.infos['collisions_with_uav'] += 2
+                # rewards[traj_l[-1]] += REWARD_UAV_WRECK
+                # rewards[traj_r[-1]] += REWARD_UAV_WRECK
+        
         # print(self.uav_positions_transfer)
         # Check termination conditions
         ####

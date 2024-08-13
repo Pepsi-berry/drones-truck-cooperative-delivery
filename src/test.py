@@ -355,7 +355,15 @@ if __name__ == "__main__":
     #     render_mode="human"
     # )
     env = env_creator({
-        'render_mode': 'human'
+        'render_mode': 'human', 
+        
+        'uav_velocity': np.array([12, 20]), 
+        'num_uavs_0': 6, 
+        'num_uavs_1': 6, 
+        'num_uavs': 12, 
+
+        'num_uav_obstacle': 8, 
+        'num_no_fly_zone': 0, 
     })
     
     # sb3 style code
@@ -368,7 +376,7 @@ if __name__ == "__main__":
         # print("worker: ", worker)
         # print("episode: ", episode)
         if agent_id.startswith("uav"):
-            return "mappo_policy"
+            return "masac_policy"
         else:
             raise ValueError("Unknown agent type: ", agent_id)
     config = (
@@ -399,7 +407,7 @@ if __name__ == "__main__":
             )
         .multi_agent(
             policies={
-                "mappo_policy": PolicySpec(
+                "masac_policy": PolicySpec(
                 policy_class=None,  # infer automatically from Algorithm
                 observation_space=None,  # infer automatically from env
                 action_space=None,  # infer automatically from env
@@ -411,7 +419,7 @@ if __name__ == "__main__":
         .resources(num_gpus=0)
         )
     masac_agent = SAC(config=config)
-    masac_agent.restore('training/models/SAC_best_checkpoint_000124')
+    masac_agent.restore('training/models/SAC_best_checkpoint_12_1000_137')
     
     # randList = [99112, 39566, 26912, 97613, 100615, 91316, 91792, 50701, 83019, 112200, 47254, 78875, 38088, 21103, 44819]
     # for i in range(10):
@@ -454,23 +462,24 @@ if __name__ == "__main__":
     
     
     observations, infos = env.reset(seed=seed)
-    for i in range(100):
+    for i in range(75):
         actions = {
             # here is situated the policy
             # agent: sample_action(env, observations, agent)
             agent: masac_agent.compute_single_action(
                 observation=observations[agent], 
-                policy_id='mappo_policy'
+                policy_id='masac_policy'
             )
             for agent in env.agents if match("uav", agent) #  and not infos[agent]
         }
         # print(actions)
         observations, rewards, terminations, truncations, infos = env.step(actions)
+        # print(rewards)
         
         if not env.agents:
             print("finish in : ", i)
             break
-        if i % 2 == 0:
+        if i % 1 == 0:
             env.render()
 
     # print("pass")

@@ -21,7 +21,7 @@ from ray.rllib.env import ParallelPettingZooEnv
 from ray.rllib.models import ModelCatalog
 # from ray.rllib.algorithms.ppo import PPOConfig, PPO
 from ray.rllib.algorithms.sac import SACConfig, SAC
-# from ray.rllib.algorithms.algorithm import Algorithm
+from ray.rllib.algorithms.algorithm import Algorithm
 from ray.rllib.policy.policy import PolicySpec
 # from ray.rllib.evaluation import episode_v2
 
@@ -244,6 +244,11 @@ if __name__ == "__main__":
     # algo_mappo = Algorithm.from_checkpoint('training/models/checkpoint_000155')
     # print("Model Info", algo_mappo.get_policy('mappo_policy').model)
     
+    ckpt_path = os.path.abspath(os.path.join('/', 'ray_result', ''))
+    print(ckpt_path)
+    if not os.path.exists(ckpt_path):
+        ckpt_path = None
+    
     # analysis = tune.run(
     #     "SAC", 
     #     config=config, 
@@ -257,7 +262,7 @@ if __name__ == "__main__":
     #         'checkpoint_frequency': 20, 
     #     }
     # )
-    
+        
     env = MultiUAVsTrainingEnvironmentWithObstacle(step_len=2, 
                                                    render_mode='human', 
                                                    num_uavs=8, 
@@ -267,8 +272,6 @@ if __name__ == "__main__":
                                                    num_no_fly_zone=2)
     
     obs, _ = env.reset()
-    
-    env.set_curriculum(1)
     
     # env.render()
     # for i in range(1_500):

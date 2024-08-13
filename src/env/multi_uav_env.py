@@ -85,7 +85,7 @@ class MultiUAVsTrainingEnvironmentWithObstacle(ParallelEnv):
         self.time_step = 0
         self.curriculum_reservation = -1
         self.curriculum = None
-        self.dist_threshold = 50
+        self.dist_threshold = 20
         self.generative_range = 750 #  + int(self.RNG.integers(1, 4) / 4) * 1000
         
         # uav parameters

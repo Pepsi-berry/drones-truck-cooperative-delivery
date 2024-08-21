@@ -22,9 +22,12 @@
 *.rar
 *.tar
 *.zip
+*.lp
+*.ilp
 checkpoint*
 SAC_best*
 SAC_shortest*
+MFSTSP*
 
 # Logs and databases #
 ######################

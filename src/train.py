@@ -168,19 +168,18 @@ if __name__ == "__main__":
         # print("worker: ", worker)
         # print("episode: ", episode)
         if agent_id.startswith("uav"):
-            return "mappo_policy"
+            return "masac_policy"
         else:
             raise ValueError("Unknown agent type: ", agent_id)
     
     config = (
         SACConfig()
         .environment('ma_training_env')
-        # .env_runners(
-        #     num_env_runners=4, 
-        #     num_cpus_per_env_runner=2, 
-        #     rollout_fragment_length='auto'
-        # )
-        # .rollouts(num_rollout_workers=4, rollout_fragment_length=128) # deprecated, use env_runners instead、
+        .env_runners(
+            # num_env_runners=4, 
+            # num_cpus_per_env_runner=1, 
+            rollout_fragment_length=32
+        )
         .experimental(
             _disable_preprocessor_api=True
         )
@@ -188,15 +187,18 @@ if __name__ == "__main__":
         .checkpointing(export_native_model_files=True)
         .training(
             # model={
-            #     'custom_model': "Custom_PPO_Model",
-            #     # 'vf_share_layers': True,
-            #     "_disable_preprocessor_api": True
+            #     # 'custom_model': "Custom_PPO_Model",
+            #     # # 'vf_share_layers': True,
+            #     # "_disable_preprocessor_api": True
+            #     "max_seq_len": 32, 
             #     },
             policy_model_config = {
-                "custom_model": CustomSACPolicyModel,  # Use this to define custom Q-model(s).
+                "custom_model": CustomRNNSACPolicyModel,  # Use this to define custom Q-model(s).
+                "max_seq_len": 32, 
             },
             q_model_config = {
-                "custom_model": CustomSACQModel,  # Use this to define custom Q-model(s).
+                "custom_model": CustomRNNSACQModel,  # Use this to define custom Q-model(s).
+                "max_seq_len": 32, 
             },
             gamma=0.99, 
             lr=0.0003,
@@ -205,7 +207,7 @@ if __name__ == "__main__":
             train_batch_size=256, 
             num_steps_sampled_before_learning_starts=1_000, 
             replay_buffer_config={
-                "capacity": 10000,
+                "capacity": 10_000,
             }
             # entropy_coeff=entropy_coeff, 
             # clip_param=clip_param,
@@ -219,7 +221,7 @@ if __name__ == "__main__":
         # .rl_module()
         .multi_agent(
             policies={
-                "mappo_policy": PolicySpec(
+                "masac_policy": PolicySpec(
                 policy_class=None,  # infer automatically from Algorithm
                 observation_space=None,  # infer automatically from env
                 action_space=None,  # infer automatically from env
@@ -244,34 +246,34 @@ if __name__ == "__main__":
     # algo_mappo = Algorithm.from_checkpoint('training/models/checkpoint_000155')
     # print("Model Info", algo_mappo.get_policy('mappo_policy').model)
     
-    ckpt_path = os.path.abspath(os.path.join('/', 'ray_result', ''))
-    print(ckpt_path)
-    if not os.path.exists(ckpt_path):
-        ckpt_path = None
+    # ckpt_path = os.path.abspath(os.path.join('/', 'ray_result', ''))
+    # print(ckpt_path)
+    # if not os.path.exists(ckpt_path):
+    #     ckpt_path = None
     
-    # analysis = tune.run(
-    #     "SAC", 
-    #     config=config, 
-    #     stop={
-    #         # "training_iteration": 50, 
-    #         "timesteps_total": 1_000_000, 
-    #     }, 
-    #     # storage_path="./training/logs", 
-    #     checkpoint_config={
-    #         'checkpoint_at_end': True, 
-    #         'checkpoint_frequency': 20, 
-    #     }
-    # )
+    analysis = tune.run(
+        "SAC", 
+        config=config, 
+        stop={
+            "training_iteration": 50, 
+            # "timesteps_total": 1_000_000, 
+        }, 
+        # storage_path="./training/logs", 
+        checkpoint_config={
+            'checkpoint_at_end': True, 
+            'checkpoint_frequency': 50, 
+        }
+    )
         
-    env = MultiUAVsTrainingEnvironmentWithObstacle(step_len=2, 
-                                                   render_mode='human', 
-                                                   num_uavs=8, 
-                                                   num_uavs_0=4, 
-                                                   num_uavs_1=4, 
-                                                   num_uav_obstacle=4, 
-                                                   num_no_fly_zone=2)
+    # env = MultiUAVsTrainingEnvironmentWithObstacle(step_len=2, 
+    #                                                render_mode='human', 
+    #                                                num_uavs=8, 
+    #                                                num_uavs_0=4, 
+    #                                                num_uavs_1=4, 
+    #                                                num_uav_obstacle=4, 
+    #                                                num_no_fly_zone=2)
     
-    obs, _ = env.reset()
+    # obs, _ = env.reset()
     
     # env.render()
     # for i in range(1_500):
@@ -289,46 +291,9 @@ if __name__ == "__main__":
     #     if not env.agents:
     #         break
             
-    env.close()
+    # env.close()
     
     ray.shutdown()
-    
-    ##########
-    
-    # env = MultiUAVsTrainingEnvironmentWithObstacle()
-    # parallel_api_test(env, 10_000)
-    
-    # env = UAVTrainingEnvironmentWithObstacle(num_uav_obstacle=20, num_no_fly_zone=4, truck_velocity=4, MAX_STEP=800, step_len=2, render_mode="human")
-    # # env = UAVEvalEnvironmentWithObstacle(num_uav_obstacle=10, num_no_fly_zone=4, truck_velocity=4, MAX_STEP=800, step_len=2, render_mode="human")
-     
-    # env = Monitor(env, os.path.join("training", "logs", "Monitor"))
-    
-    # model_path = os.path.join("training", "models", "best_model_SAC_20K")
-    # model = SAC.load(model_path)
-    # # print(model.policy)
-    # # print("eval result: ", evaluate_policy(model, env, n_eval_episodes=10, deterministic=True))
-    # obs, info = env.reset(options=0)
-    # # print(obs)
-    # # print(env.uav_position, env.truck_position, env.truck_target_position, obs["vecs"])
-    # rewards = 0
-    # env.render()
-    # for i in range(50):
-    # # while True:
-    #     action, _ = model.predict(obs, deterministic=True)
-    #     # action = env.action_space.sample()
-    #     # print(action)
-    #     obs, reward, termination, truncation, info = env.step(action)
-    #     # print(env.uav_position, env.truck_position, env.truck_target_position, obs["vecs"])
-    #     # print(reward)
-    #     rewards += reward
-    #     if i % 3 == 0:
-    #         env.render()
-    #     if termination or truncation:
-    #         # print(env.time_step, termination, truncation)
-    #         break
-            
-    # env.close()
-    # print(rewards)
     
     # env = ss.pettingzoo_env_to_vec_env_v1(env)
     # env = ss.concat_vec_envs_v1(env, 8, 2)

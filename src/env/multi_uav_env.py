@@ -106,8 +106,8 @@ class MultiUAVsTrainingEnvironmentWithObstacle(ParallelEnv):
         
         
         # map parameters
-        self.map_size = 5_000 # m as unit here
-        self.grid_edge = 125 # m as unit here
+        self.map_size = 10_000 # m as unit here
+        self.grid_edge = 250 # m as unit here
         
         # obstacle parameters
         self.num_uav_obstacle = num_uav_obstacle

@@ -28,6 +28,7 @@ checkpoint*
 SAC_best*
 SAC_shortest*
 MFSTSP*
+data*
 
 # Logs and databases #
 ######################

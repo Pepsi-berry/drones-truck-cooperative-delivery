@@ -11,6 +11,10 @@ from gymnasium.utils import seeding
 from pettingzoo import ParallelEnv
 import pygame
 
+MODE_NORMAL = 0
+MODE_TRUCK_NOLY = 1
+MODE_MFSTSP = 2
+
 MAX_INT = 2**20
 INVALID_ANGLE = 10
 # When the distance between the returning uav and the truck is less than this threshold, 
@@ -87,8 +91,8 @@ class DeliveryEnvironmentWithObstacle(ParallelEnv):
         self.MAX_STEP = MAX_STEP
         self.step_len = step_len
         self.time_step = 0
-        # independent-truck mode off initially
-        self.mode = 0
+        # alternative mode off initially
+        self.mode = MODE_NORMAL
         
         # uav parameters
         # unit here is m/s
@@ -115,11 +119,12 @@ class DeliveryEnvironmentWithObstacle(ParallelEnv):
         self.num_customer_truck = self.num_parcels - self.num_parcels_uav
         self.num_customer_uav = self.num_parcels - self.num_parcels_truck
         self.num_customer_both = self.num_parcels - self.num_parcels_truck - self.num_parcels_uav
+        self.num_flexible_locations = self.num_parcels
         self.weight_probabilities = [0.8, 0.1, 0.1]
         
         # map parameters
-        self.map_size = 5_000 # m as unit here
-        self.grid_edge = 125 # m as unit here
+        self.map_size = 10_000 # m as unit here
+        self.grid_edge = 250 # m as unit here
         
         # obstacle parameters
         self.num_uav_obstacle = num_uav_obstacle
@@ -159,6 +164,7 @@ class DeliveryEnvironmentWithObstacle(ParallelEnv):
         self.uav_battery_remaining = None
         # variables used to help representing the movements of the agent in step()
         self.uav_target_positions = None
+        self.retrieve_target_positions = None
         self.truck_target_position = None
         # self.uav_dist = None
         # self.uav_target_dist = None
@@ -195,6 +201,7 @@ class DeliveryEnvironmentWithObstacle(ParallelEnv):
         self.customer_position_truck = None
         self.customer_position_uav = None
         self.customer_position_both = None
+        self.flexible_locations = None
         
         # parcel weights probability distribution: 
         # <= 3.6kg: 0.8, 3.6kg - 10kg: 0.1, > 10kg: 0.1
@@ -367,9 +374,9 @@ class DeliveryEnvironmentWithObstacle(ParallelEnv):
             if (
                 not np.array_equal(np.concatenate([src_pos, dst_pos]), np.concatenate([this_start_pos, this_end_pos]))
                 and
-                np.int64(cross_product_2d_array(dst_pos - src_pos, this_start_pos - src_pos)) * cross_product_2d_array(dst_pos - src_pos, this_end_pos - src_pos) <= 0 
+                np.int64(cross_product_2d_array(dst_pos - src_pos, this_start_pos - src_pos)) * cross_product_2d_array(dst_pos - src_pos, this_end_pos - src_pos) < 0 
                 and 
-                np.int64(cross_product_2d_array(this_end_pos - this_start_pos, src_pos - this_start_pos)) * cross_product_2d_array(this_end_pos - this_start_pos, dst_pos - this_start_pos) <= 0
+                np.int64(cross_product_2d_array(this_end_pos - this_start_pos, src_pos - this_start_pos)) * cross_product_2d_array(this_end_pos - this_start_pos, dst_pos - this_start_pos) < 0
                 ):
                 uav_names.append(uav_name)
         
@@ -422,7 +429,7 @@ class DeliveryEnvironmentWithObstacle(ParallelEnv):
                 if self.uav_stages[uav_no] == 1:
                     uav_target = copy(self.uav_target_positions[uav_no])
                 else:
-                    uav_target = copy(self.truck_position)
+                    uav_target = copy(self.retrieve_target_positions[uav_no])
                 uav_obs[2][int(np.clip(uav_target[0], boundary_min_x, boundary_max_x) - x_offset)][int(np.clip(uav_target[1], boundary_min_y, boundary_max_y) - y_offset)] = 1
         
         return uav_obs
@@ -441,8 +448,8 @@ class DeliveryEnvironmentWithObstacle(ParallelEnv):
         # re-seed the RNG
         if seed is not None:
             self.RNG, _ = seeding.np_random(seed)
-        # set the independent-truck mode on or off
-        # 0 means off, 1 means on
+        # set the independent-truck mode or mfstsp mode
+        # 0 means off, 1 means independent-truck, 2 means mfstsp
         if options is not None:
             self.mode = options
         # set the time step to 0 initially
@@ -476,6 +483,13 @@ class DeliveryEnvironmentWithObstacle(ParallelEnv):
              for i in range(self.num_customer_both)], dtype=np.int32
             )
         
+        # only used for CTDRSP
+        self.flexible_locations = np.array(
+            [[self.RNG.integers(0.2 * self.map_size, 0.8 * self.map_size), self.RNG.integers(0.2 * grid_num, 0.8 * grid_num)*self.grid_edge] if i % 2 
+            else [self.RNG.integers(0.2 * grid_num, 0.8 * grid_num)*self.grid_edge, self.RNG.integers(0.2 * self.map_size, 0.8 * self.map_size)] 
+            for i in range(self.num_flexible_locations)], dtype=np.int32
+            )
+        
         # if self.num_no_fly_zone or self.num_uav_obstacle:
         self.no_fly_zones = np.array([self.generate_no_fly_zone() for _ in range(self.num_no_fly_zone)])
         self.uav_obstacles = [self.generate_uav_obstacle(grid_num) for _ in range(self.num_uav_obstacle)]
@@ -486,6 +500,7 @@ class DeliveryEnvironmentWithObstacle(ParallelEnv):
         # Initially, the target points of all agents are not determined
         # So the truck path is set to empty
         self.uav_target_positions = np.ones([self.num_uavs, 2], dtype=np.int32) * (-1)
+        self.retrieve_target_positions = [ np.zeros([2]) for _ in range(self.num_uavs) ]
         self.truck_target_position = np.ones(2) * -1
         self.truck_path = []
         self.uav_positions_transfer = []
@@ -562,10 +577,11 @@ class DeliveryEnvironmentWithObstacle(ParallelEnv):
                         "surroundings" : self.get_obs_by_uav(agent), 
                         # "vecs" : np.row_stack([self.uav_position[self.uav_name_mapping[agent]], 
                         #                               self.truck_position, self.truck_position])
-                        "vecs" : np.concatenate([
-                            self.truck_position - self.uav_position[self.uav_name_mapping[agent]], 
-                            self.truck_position - self.truck_position
-                            ]).astype(np.int32)
+                        "vecs" : np.zeros(4).astype(np.int32)
+                            # np.concatenate([
+                            # self.truck_position - self.uav_position[self.uav_name_mapping[agent]], 
+                            # self.truck_position - self.truck_position
+                            # ]).astype(np.int32)
                     })
                 
                 # "action_mask": current_action_masks[agent]
@@ -600,13 +616,25 @@ class DeliveryEnvironmentWithObstacle(ParallelEnv):
                     if action == 0:
                         self.truck_target_position = copy(self.warehouse_position)
                     elif 0 < action <= self.num_parcels_truck:
-                        self.truck_target_position = copy(self.customer_position_truck[action - 1])
-                        self.truck_masks[action] = 0
+                        if self.truck_masks[action] == 0:
+                            self.infos['is_ready'][agent] = True
+                        else:
+                            self.truck_masks[action] = 0
+                            self.truck_target_position = copy(self.customer_position_truck[action - 1])
                     elif self.num_parcels_truck < action <= self.num_customer_truck:
-                        self.truck_target_position = copy(self.customer_position_both[action - self.num_parcels_truck - 1])
-                        # self.truck_masks[action] = 0
+                        if self.truck_masks[action] == 0:
+                            self.infos['is_ready'][agent] = True
+                        else:
+                            self.truck_target_position = copy(self.customer_position_both[action - self.num_parcels_truck - 1])
+                            # self.truck_masks[action] = 0
+                    elif self.num_customer_truck < action <= self.num_parcels:
+                        if self.action_masks[action] == 0:
+                            self.infos['is_ready'][agent] = True
+                        else:
+                            self.truck_target_position = copy(self.customer_position_uav[action - self.num_customer_truck - 1])
                     else:
-                        self.truck_target_position = copy(self.customer_position_uav[action - self.num_customer_truck - 1])
+                        self.truck_target_position = copy(self.flexible_locations[action - self.num_parcels - 1])
+                    # print("truck: ", self.truck_target_position)
                 elif isinstance(action, np.ndarray):
                     self.infos['is_ready'][agent] = False
                     idx = np.where((self.customer_position_truck == action).all(axis=1))[0]
@@ -619,14 +647,36 @@ class DeliveryEnvironmentWithObstacle(ParallelEnv):
             elif match("uav", agent):
                 uav_no = self.uav_name_mapping[agent]
                 if self.uav_stages[uav_no] == -1 and action != -1:
-                    self.infos['is_ready'][agent] = False
-                    self.uav_masks[action] = 0
-                    self.uav_stages[uav_no] = 1
-                    if action < self.num_customer_both:
-                        self.uav_target_positions[uav_no] = copy(self.customer_position_both[action])
-                    else:
-                        self.uav_target_positions[uav_no] = copy(self.customer_position_uav[action - self.num_customer_both])
-    
+                    if isinstance(action, np.int64) or isinstance(action, int): # action: [0, num_customer_uav)
+                        self.infos['is_ready'][agent] = False
+                        self.uav_masks[action] = 0
+                        self.uav_stages[uav_no] = 1
+                        self.retrieve_target_positions[uav_no] = self.truck_position
+                        # print(self.retrieve_target_positions, self.truck_position)
+                        if action < self.num_customer_both:
+                            self.uav_target_positions[uav_no] = copy(self.customer_position_both[action])
+                        else:
+                            self.uav_target_positions[uav_no] = copy(self.customer_position_uav[action - self.num_customer_both])
+                        # print("uav ", uav_no, " :", self.uav_target_positions[uav_no])
+                    elif isinstance(action, tuple): # tuple:(customer node(0 - num_customer_uav - 1), retrieve node(0 - num_parcels + num_flexible_points))
+                        self.infos['is_ready'][agent] = False
+                        self.uav_stages[uav_no] = 1
+                        self.uav_masks[action[0]] = 0
+                        if action[0] < self.num_customer_both:
+                            self.uav_target_positions[uav_no] = copy(self.customer_position_both[action[0]])
+                        else:
+                            self.uav_target_positions[uav_no] = copy(self.customer_position_uav[action[0] - self.num_customer_both])
+                        
+                        if action[1] == 0:
+                            self.retrieve_target_positions[uav_no] = copy(self.warehouse_position)
+                        elif 0 < action[1] <= self.num_parcels_truck:
+                            self.retrieve_target_positions[uav_no] = copy(self.customer_position_truck[action[1] - 1])
+                        elif self.num_parcels_truck < action[1] <= self.num_customer_truck:
+                            self.retrieve_target_positions[uav_no] = copy(self.customer_position_both[action[1] - self.num_parcels_truck - 1])
+                        elif self.num_customer_truck < action[1] <= self.num_parcels:
+                            self.retrieve_target_positions[uav_no] = copy(self.customer_position_uav[action[1] - self.num_customer_truck - 1])
+                        else:
+                            self.retrieve_target_positions[uav_no] = copy(self.flexible_locations[action[1] - self.num_parcels - 1])
     
     # When the truck performs a new action, it first generates a refined path through genarate_truck_path(),
     # and then moves in truck_move() according to the generated path before reaching the target 
@@ -638,41 +688,11 @@ class DeliveryEnvironmentWithObstacle(ParallelEnv):
         id_grid_truck_y = int(self.truck_position[1] / self.grid_edge)
         id_grid_target_y = int(target[1] / self.grid_edge)
     
-        if target[0] == self.truck_position[0] or target[1] == self.truck_position[1]:
+        if (target[0] == self.truck_position[0] and target[0] % self.grid_edge == 0) or (target[1] == self.truck_position[1] and target[1] % self.grid_edge == 0):
             # situation 1:
             # ##T##...###C#
             # truck and target at the same route line 
             self.truck_path.append(target)
-        elif id_grid_target_x == id_grid_truck_x and id_grid_target_y != id_grid_truck_y:
-            # situation 2:
-            #    # # T # #
-            #    #       #
-            #    #  ...  #
-            #    #       #
-            #    # # # C #
-            if (self.truck_position[0] % self.grid_edge) + (target[0] % self.grid_edge) <= self.grid_edge:
-                self.truck_path.append(np.array([id_grid_truck_x * self.grid_edge, id_grid_truck_y * self.grid_edge]))
-                self.truck_path.append(np.array([id_grid_target_x * self.grid_edge, id_grid_target_y * self.grid_edge]))
-                self.truck_path.append(target)
-            else:
-                self.truck_path.append(np.array([(id_grid_truck_x + 1) * self.grid_edge, id_grid_truck_y * self.grid_edge]))
-                self.truck_path.append(np.array([(id_grid_target_x + 1) * self.grid_edge, id_grid_target_y * self.grid_edge]))
-                self.truck_path.append(target)
-        elif id_grid_target_y == id_grid_truck_y and id_grid_target_x != id_grid_truck_x:
-            # situation 3:
-            #    # # # # #
-            #    #   .   C
-            #    T   .   #
-            #    #   .   #
-            #    # # # # #
-            if (self.truck_position[1] % self.grid_edge) + (target[1] % self.grid_edge) <= self.grid_edge:
-                self.truck_path.append(np.array([id_grid_truck_x * self.grid_edge, id_grid_truck_y * self.grid_edge]))
-                self.truck_path.append(np.array([id_grid_target_x * self.grid_edge, id_grid_target_y * self.grid_edge]))
-                self.truck_path.append(target)
-            else:
-                self.truck_path.append(np.array([id_grid_truck_x * self.grid_edge, (id_grid_truck_y + 1) * self.grid_edge]))
-                self.truck_path.append(np.array([id_grid_target_x * self.grid_edge, (id_grid_target_y + 1) * self.grid_edge]))
-                self.truck_path.append(target)
         elif self.truck_position[0] % self.grid_edge == 0:
             if target[1] % self.grid_edge == 0:
                 # situation 4:
@@ -684,27 +704,59 @@ class DeliveryEnvironmentWithObstacle(ParallelEnv):
                 self.truck_path.append(np.array([id_grid_truck_x * self.grid_edge, id_grid_target_y * self.grid_edge]))
                 self.truck_path.append(target)
             else:
+                if id_grid_target_y == id_grid_truck_y and id_grid_target_x != id_grid_truck_x:
+                    # situation 3:
+                    #    # # # # #
+                    #    #   .   C
+                    #    T   .   #
+                    #    #   .   #
+                    #    # # # # #
+                    if (self.truck_position[1] % self.grid_edge) + (target[1] % self.grid_edge) <= self.grid_edge:
+                        self.truck_path.append(np.array([id_grid_truck_x * self.grid_edge, id_grid_truck_y * self.grid_edge]))
+                        self.truck_path.append(np.array([id_grid_target_x * self.grid_edge, id_grid_target_y * self.grid_edge]))
+                        self.truck_path.append(target)
+                    else:
+                        self.truck_path.append(np.array([id_grid_truck_x * self.grid_edge, (id_grid_truck_y + 1) * self.grid_edge]))
+                        self.truck_path.append(np.array([id_grid_target_x * self.grid_edge, (id_grid_target_y + 1) * self.grid_edge]))
+                        self.truck_path.append(target)
                 # situation 5:
                 #    # # T # # # # # #
                 #    #       #       #
                 #    #  ...  #       #
                 #    #       #       #
                 #    # # # # # C # # #
-                self.truck_path.append(np.array([id_grid_truck_x * self.grid_edge, id_grid_target_y * self.grid_edge] if self.truck_position[1] < target[1]
-                                                else [id_grid_truck_x * self.grid_edge, (id_grid_target_y + 1) * self.grid_edge]))
-                # self.truck_path.append(np.array([id_grid_target_x * self.grid_edge, self.truck_path[-1][1]]))
-                self.truck_path.append(np.array([target[0], self.truck_path[-1][1]]))
-                self.truck_path.append(target)
+                else:
+                    self.truck_path.append(np.array([id_grid_truck_x * self.grid_edge, id_grid_target_y * self.grid_edge] if self.truck_position[1] < target[1]
+                                                    else [id_grid_truck_x * self.grid_edge, (id_grid_target_y + 1) * self.grid_edge]))
+                    # self.truck_path.append(np.array([id_grid_target_x * self.grid_edge, self.truck_path[-1][1]]))
+                    self.truck_path.append(np.array([target[0], self.truck_path[-1][1]]))
+                    self.truck_path.append(target)
         # so as situation 4 and 5.
         elif self.truck_position[1] % self.grid_edge == 0:
             if target[0] % self.grid_edge == 0:
                 self.truck_path.append(np.array([id_grid_target_x * self.grid_edge, id_grid_truck_y * self.grid_edge]))
                 self.truck_path.append(target)
             else:
-                self.truck_path.append(np.array([id_grid_target_x * self.grid_edge, id_grid_truck_y * self.grid_edge] if self.truck_position[0] < target[0]
-                                                else [(id_grid_target_x + 1) * self.grid_edge, id_grid_truck_y * self.grid_edge]))
-                self.truck_path.append(np.array([self.truck_path[-1][0], target[1]]))
-                self.truck_path.append(target)
+                if id_grid_target_x == id_grid_truck_x and id_grid_target_y != id_grid_truck_y:
+                    # situation 2:
+                    #    # # T # #
+                    #    #       #
+                    #    #  ...  #
+                    #    #       #
+                    #    # # # C #
+                    if (self.truck_position[0] % self.grid_edge) + (target[0] % self.grid_edge) <= self.grid_edge:
+                        self.truck_path.append(np.array([id_grid_truck_x * self.grid_edge, id_grid_truck_y * self.grid_edge]))
+                        self.truck_path.append(np.array([id_grid_target_x * self.grid_edge, id_grid_target_y * self.grid_edge]))
+                        self.truck_path.append(target)
+                    else:
+                        self.truck_path.append(np.array([(id_grid_truck_x + 1) * self.grid_edge, id_grid_truck_y * self.grid_edge]))
+                        self.truck_path.append(np.array([(id_grid_target_x + 1) * self.grid_edge, id_grid_target_y * self.grid_edge]))
+                        self.truck_path.append(target)
+                else:
+                    self.truck_path.append(np.array([id_grid_target_x * self.grid_edge, id_grid_truck_y * self.grid_edge] if self.truck_position[0] < target[0]
+                                                    else [(id_grid_target_x + 1) * self.grid_edge, id_grid_truck_y * self.grid_edge]))
+                    self.truck_path.append(np.array([self.truck_path[-1][0], target[1]]))
+                    self.truck_path.append(target)
         
         # print(id_grid_truck_x, id_grid_truck_y, id_grid_target_x, id_grid_target_y)
         # print("current: ", self.truck_position)
@@ -760,7 +812,7 @@ class DeliveryEnvironmentWithObstacle(ParallelEnv):
         if self.uav_stages[uav_no] == 1:
             uav_target = copy(self.uav_target_positions[uav_no])
         else:
-            uav_target = copy(self.truck_position)
+            uav_target = copy(self.retrieve_target_positions[uav_no])
         
         # tjc_xlo, tjc_xhi, tjc_ylo, tjc_yhi = (
         #     min(src_pos[0], self.uav_position[uav_no][0]), 
@@ -778,13 +830,12 @@ class DeliveryEnvironmentWithObstacle(ParallelEnv):
                 self.uav_position[uav_no] = obstacle[0] + obstacle[1] / 2
                 return -2
             
-        # check if the distance between this uav with others is less than safe distance
-        # to be modified
+        # check if the line conflict occured
         # if no != uav_no and np.sqrt(np.sum(np.square(self.uav_position[uav_no] - self.uav_position[no]))) < DIST_RESTRICT_UAV:
-        is_intersect = self.uav_tjcs_intersect(src_pos, self.uav_position[uav_no])
-        if is_intersect:
-            # print("!!WHY YOU!!", uav, is_intersect)
-            return is_intersect
+        # is_intersect = self.uav_tjcs_intersect(src_pos, self.uav_position[uav_no])
+        # if is_intersect:
+        #     # print("!!WHY YOU!!", uav, is_intersect)
+        #     return is_intersect
         
         for nfz in self.no_fly_zones:
             if self.uav_tjc_zone_intersect(nfz, src_pos, self.uav_position[uav_no]):
@@ -895,7 +946,7 @@ class DeliveryEnvironmentWithObstacle(ParallelEnv):
             idx = np.where((self.customer_position_both == self.truck_target_position).all(axis=1))[0]
             if idx.size:
                 self.truck_masks[idx[0] + self.num_parcels_truck + 1] = 0
-            if self.mode:
+            if self.mode == MODE_TRUCK_NOLY or self.mode == MODE_MFSTSP:
                 # truck can delivery all kind of parcels when the independent-truck mode on
                 idx = np.where((self.customer_position_uav == self.truck_target_position).all(axis=1))[0]
                 if idx.size:
@@ -934,7 +985,16 @@ class DeliveryEnvironmentWithObstacle(ParallelEnv):
                     #     self.infos.pop(agent)
                     #     # rewards["Global"] += REWARD_UAV_WRECK
                     if uav_moving_result == 1:
-                        self.uav_stages[uav_no] -= 1
+                        # print(self.retrieve_target_positions, self.truck_position)
+                        if self.uav_stages[uav_no] == 0 and self.mode == MODE_MFSTSP:
+                            # print(self.retrieve_target_positions)
+                            if np.array_equal(self.uav_position[uav_no], self.truck_position):
+                                # print("**", uav_no)
+                                self.uav_stages[uav_no] -= 1
+                            # else:
+                            #     print(self.uav_position[uav_no], "***", uav_no, "***", self.truck_position)
+                        else:
+                            self.uav_stages[uav_no] -= 1
                         if self.uav_stages[uav_no] == -1:
                             self.infos['is_ready'][agent] = True
                             # charging after returning completion
@@ -966,7 +1026,7 @@ class DeliveryEnvironmentWithObstacle(ParallelEnv):
                             uav_target = copy(self.uav_target_positions[uav_no])
                             uav_target_before = copy(self.uav_target_positions[uav_no])
                         else:
-                            uav_target = copy(self.truck_position)
+                            uav_target = copy(self.retrieve_target_positions[uav_no])
                             uav_target_before = truck_position_before
                         dist_before = np.sqrt(np.sum(np.square(positions_before[uav_no] - uav_target_before)))
                         dist_diff = dist_before - np.sqrt(np.sum(np.square(self.uav_position[uav_no] - uav_target)))
@@ -1027,7 +1087,7 @@ class DeliveryEnvironmentWithObstacle(ParallelEnv):
                 [
                     (
                         self.uav_target_positions[self.uav_name_mapping[agent]] if self.uav_stages[self.uav_name_mapping[agent]] == 1
-                        else self.truck_position # when the stage == -1, result doesn't matter
+                        else self.retrieve_target_positions[self.uav_name_mapping[agent]] # when the stage == -1, result doesn't matter
                     ) - self.uav_position[self.uav_name_mapping[agent]], 
                     (
                         np.array([0, 0]) if self.uav_stages[self.uav_name_mapping[agent]] == 1

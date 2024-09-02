@@ -5,7 +5,7 @@ from gurobipy import GRB
 from copy import copy
 
 
-def k_means_cluster(nodes, locations, uav_range, SIZE, K_min, K_max, G_max, max_iter=200):
+def k_means_cluster(nodes, locations, uav_range, SIZE, K_min, K_max, G_max, max_it_outer=400, max_iter=200):
     # initaliza parameters
     K_curr = K_min
     depot = locations[nodes[0]]
@@ -17,7 +17,11 @@ def k_means_cluster(nodes, locations, uav_range, SIZE, K_min, K_max, G_max, max_
     distances = np.linalg.norm(points[:, np.newaxis] - focal_points, axis=2)
     assign = np.argmin(distances, axis=1)
     
+    it = 0
     while not all(distances[cust][assign[cust]] <= uav_range for cust in range(num_points)) or not np.all(np.bincount(assign) < G_max):
+        it += 1
+        if it >= max_it_outer:
+            return focal_points, assign
         # return when constraints are met
         if K_curr < K_max:
             K_curr += 1
@@ -292,11 +296,12 @@ def solve_JOCR_U(nodes, locations, uav_range, uav_velocity, truck_velocity, SIZE
         
         # solve
         model.update()
+        model.setParam('TimeLimit', 120)
         model.optimize()
         
         # post process
-        if model.status == GRB.OPTIMAL:
-            model.write("model.lp")
+        if model.SolCount > 0:
+            # model.write("model.lp")
             focal_points_star = [(a[i].X, b[i].X) for i in clusters]
             assignments_star = np.array([
                 [ x[l, k].X for k in range(num_clusters) ] 

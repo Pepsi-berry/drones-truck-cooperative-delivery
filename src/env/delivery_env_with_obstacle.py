@@ -468,25 +468,25 @@ class DeliveryEnvironmentWithObstacle(ParallelEnv):
         # All customer points are distributed at the edge of the road grid
         grid_num = self.map_size / self.grid_edge
         self.customer_position_truck = np.array(
-            [[self.RNG.integers(0.3 * self.map_size, 0.7 * self.map_size), self.RNG.integers(0.3 * grid_num, 0.7 * grid_num)*self.grid_edge] if i % 2 
-             else [self.RNG.integers(0.3 * grid_num, 0.7 * grid_num)*self.grid_edge, self.RNG.integers(0.3 * self.map_size, 0.7 * self.map_size)] 
+            [[self.RNG.integers(0.25 * self.map_size, 0.75 * self.map_size), self.RNG.integers(0.25 * grid_num, 0.75 * grid_num)*self.grid_edge] if i % 2 
+             else [self.RNG.integers(0.25 * grid_num, 0.75 * grid_num)*self.grid_edge, self.RNG.integers(0.25 * self.map_size, 0.75 * self.map_size)] 
              for i in range(self.num_parcels_truck)], dtype=np.int32
             )
         self.customer_position_uav = np.array(
-            [[self.RNG.integers(0.2 * self.map_size, 0.8 * self.map_size), self.RNG.integers(0.2 * grid_num, 0.8 * grid_num)*self.grid_edge] if i % 2 
-             else [self.RNG.integers(0.2 * grid_num, 0.8 * grid_num)*self.grid_edge, self.RNG.integers(0.2 * self.map_size, 0.8 * self.map_size)] 
+            [[self.RNG.integers(0.15 * self.map_size, 0.85 * self.map_size), self.RNG.integers(0.15 * grid_num, 0.85 * grid_num)*self.grid_edge] if i % 2 
+             else [self.RNG.integers(0.15 * grid_num, 0.85 * grid_num)*self.grid_edge, self.RNG.integers(0.15 * self.map_size, 0.85 * self.map_size)] 
              for i in range(self.num_parcels_uav)], dtype=np.int32
             )
         self.customer_position_both = np.array(
-            [[self.RNG.integers(0.2 * self.map_size, 0.8 * self.map_size), self.RNG.integers(0.2 * grid_num, 0.8 * grid_num)*self.grid_edge] if i % 2 
-             else [self.RNG.integers(0.2 * grid_num, 0.8 * grid_num)*self.grid_edge, self.RNG.integers(0.2 * self.map_size, 0.8 * self.map_size)] 
+            [[self.RNG.integers(0.15 * self.map_size, 0.85 * self.map_size), self.RNG.integers(0.15 * grid_num, 0.85 * grid_num)*self.grid_edge] if i % 2 
+             else [self.RNG.integers(0.15 * grid_num, 0.85 * grid_num)*self.grid_edge, self.RNG.integers(0.15 * self.map_size, 0.85 * self.map_size)] 
              for i in range(self.num_customer_both)], dtype=np.int32
             )
         
         # only used for CTDRSP
         self.flexible_locations = np.array(
-            [[self.RNG.integers(0.2 * self.map_size, 0.8 * self.map_size), self.RNG.integers(0.2 * grid_num, 0.8 * grid_num)*self.grid_edge] if i % 2 
-            else [self.RNG.integers(0.2 * grid_num, 0.8 * grid_num)*self.grid_edge, self.RNG.integers(0.2 * self.map_size, 0.8 * self.map_size)] 
+            [[self.RNG.integers(0.15 * self.map_size, 0.85 * self.map_size), self.RNG.integers(0.15 * grid_num, 0.85 * grid_num)*self.grid_edge] if i % 2 
+            else [self.RNG.integers(0.15 * grid_num, 0.85 * grid_num)*self.grid_edge, self.RNG.integers(0.15 * self.map_size, 0.85 * self.map_size)] 
             for i in range(self.num_flexible_locations)], dtype=np.int32
             )
         

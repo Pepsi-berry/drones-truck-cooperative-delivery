@@ -998,28 +998,30 @@ if __name__ == "__main__":
     num_no_fly_zone = 0
     
     customer_params_set = [
-        [20, 4, 6], 
-        # [20, 6, 6], 
-        # [10, 2, 2], 
-        # [30, 6, 9], 
-        # [30, 6, 12], 
-        # [30, 5, 5], 
-        # [40, 8, 12], 
-        # [40, 10, 15], 
-        # [40, 10, 10]
+        [10, 2, 2], 
+        [20, 4, 2], 
+        [20, 6, 4], 
+        [30, 4, 2], 
+        [30, 6, 4], 
+        [30, 8, 4], 
+        [40, 6, 4], 
+        [40, 8, 4], 
+        # [40, 10, 4]
     ]
     uav_params_set = [
-        # [1, 1], 
+        [1, 1], 
         # [1, 2], 
         [2, 2], 
         # [3, 2], 
-        # [4, 2]
+        [4, 2], 
+        [4, 4], 
     ]
     obstacle_params_set = [
-        [15, 2],
-        # [1, 1], 
-        # [5, 1], 
-        # [10, 2]
+        [0, 0], 
+        [5, 0], 
+        [10, 0], 
+        [15, 0], 
+        [20, 0], 
     ]
     
     # env = env_creator({
@@ -1034,24 +1036,6 @@ if __name__ == "__main__":
     #     'num_no_fly_zone': 0, 
     # })
         
-    env = DeliveryEnvironmentWithObstacle(
-        step_len=step_len, 
-        truck_velocity=truck_velocity, 
-        uav_velocity=uav_velocity, 
-        uav_capacity=uav_capacity, 
-        uav_range=uav_range, 
-        uav_obs_range=uav_obs_range, 
-        num_truck=num_truck, 
-        num_uavs=num_uavs, 
-        num_uavs_0=num_uavs_0, 
-        num_uavs_1=num_uavs_1, 
-        num_parcels=num_parcels, 
-        num_parcels_truck=num_parcels_truck, 
-        num_parcels_uav=num_parcels_uav, 
-        num_uav_obstacle=num_uav_obstacle, 
-        num_no_fly_zone=num_no_fly_zone, 
-        render_mode="human"
-    )
     
     base_dir = os.path.join('experiments')
     existing_folders = [name for name in os.listdir(base_dir) if os.path.isdir(os.path.join(base_dir, name))]
@@ -1067,9 +1051,6 @@ if __name__ == "__main__":
     
     os.makedirs(exp_folder_path)
     
-    # column_params = ['map_size', 'grid_size', 'truck_velocity']
-    # column_uav_params = ['uav_no', 'velocity', 'range', 'capacity']
-
     columns_CTDRSP = ['exp_name', 'seed', 'locations', 'num_uavs', 'num_customers', 'num_obstacles', 'route', 'assignments', 'makespan', 'collisions_obstacle', 'collision_uavs']
     df_CTDRSP = pd.DataFrame(columns=columns_CTDRSP)
     columns_MFSTSP = ['exp_name', 'seed', 'locations', 'num_uavs', 'num_customers', 'num_obstacles', 'route', 'assignments', 'makespan', 'collisions_obstacle', 'collision_uavs']
@@ -1077,81 +1058,108 @@ if __name__ == "__main__":
     columns_JOCR = ['exp_name', 'seed', 'locations', 'num_uavs', 'num_customers', 'num_obstacles', 'focal_route', 'cluster_assignments', 'makespan', 'collisions_obstacle', 'collision_uavs']
     df_JOCR = pd.DataFrame(columns=columns_JOCR)
     
-    num_experiments = 10
+    # column_params = ['map_size', 'grid_size', 'truck_velocity']
+    # column_uav_params = ['uav_no', 'velocity', 'range', 'capacity']
+    
+    num_experiments = 40
     seed_range = 20_021_122
     seed_seq = np.random.randint(1, seed_range, size=num_experiments)
-    seed_seq = np.array([8871826, 15977745, 5886647, 13938431, 19922194, 4766029, 10447930, 19715139, 1720642, 15437063])
+    # seed_seq = np.array([8871826, 15977745, 5886647, 13938431, 19922194, 4766029, 10447930, 19715139, 1720642, 15437063])
     print(seed_seq.tolist())
-
-    for exp_no in range(num_experiments):
-        seed = int(seed_seq[exp_no])
-        # print(seed)
-        
-        # **CTDRSP**
-        # for _ in range(20):
-        # seed = random.randint(1, 20_021_122)
-        #     print(seed)
-        makespan_CTDRSP, collisions_CTDRSP, locations_CTDRSP, route_CTDRSP, assignments_CTDRSP = run_CTDRSP_exp(env, seed, render=False)
-        CTDRSP_exp_row = pd.DataFrame([{
-            'exp_name': f"CTDRSP_{exp_no}", 
-            'seed': seed, 
-            'locations': locations_CTDRSP, # { 'x': locations_CTDRSP[:, 0], 'y': locations_CTDRSP[:, 1] }, 
-            'num_uavs': { 'num_uavs_0': num_uavs_0, 'num_uavs_1': num_uavs_1 }, 
-            'num_customers': { 'truck': num_parcels_truck, 'both': num_customer_both, 'uav': num_parcels_uav }, 
-            'num_obstacles': { 'buildings': num_uav_obstacle, 'no_fly_zone': num_no_fly_zone }, 
-            'route': route_CTDRSP, 
-            'assignments': assignments_CTDRSP, 
-            'makespan': makespan_CTDRSP, 
-            'collisions_obstacle': collisions_CTDRSP[0], 
-            'collision_uavs': collisions_CTDRSP[1],
-        }], columns=columns_CTDRSP)
-        df_CTDRSP = pd.concat([df_CTDRSP, CTDRSP_exp_row], ignore_index=True)
-        # observations, infos = env.reset()
-        # delivery_upper_solver = upper_solver(observations["truck"]["pos_obs"], num_customer_both, num_parcels_truck, num_parcels_uav, num_uavs)
-        
-        # delivery_upper_solver.solve_CTDRSP(num_uavs_0, num_uavs_1, uav_velocity, uav_range * 0.2, truck_velocity)
-        
-        # **MFSTSP**
-        # for i in range(20):
-        # seed = random.randint(1, 20_021_122)
-        # print(seed)
-        makespan_MFSTSP, collisions_MFSTSP, locations_MFSTSP, route_MFSTSP, assignments_MFSTSP = run_MFSTSP_exp(env, seed, render=False)
-        MFSTSP_exp_row = pd.DataFrame([{
-            'exp_name': f"MFSTSP_{exp_no}", 
-            'seed': seed, 
-            'locations': locations_MFSTSP, 
-            'num_uavs': { 'num_uavs_0': num_uavs_0, 'num_uavs_1': num_uavs_1 }, 
-            'num_customers': { 'truck': num_parcels_truck, 'both': num_customer_both, 'uav': num_parcels_uav }, 
-            'num_obstacles': { 'buildings': num_uav_obstacle, 'no_fly_zone': num_no_fly_zone }, 
-            'route': route_MFSTSP, 
-            'assignments': assignments_MFSTSP, 
-            'makespan': makespan_MFSTSP, 
-            'collisions_obstacle': collisions_MFSTSP[0], 
-            'collision_uavs': collisions_MFSTSP[1],
-        }])
-        df_MFSTSP = pd.concat([df_MFSTSP, MFSTSP_exp_row], ignore_index=True)
-        # observations, infos = env.reset()
-        # delivery_upper_solver = upper_solver(observations["truck"]["pos_obs"], num_customer_both, num_parcels_truck, num_parcels_uav, num_uavs)
-        
-        # print(delivery_upper_solver.solve_MFSTSP(num_uavs_0, num_uavs_1, uav_velocity, uav_capacity, truck_velocity))
-        
-        # **JOCR**
-        # seed = random.randint(1, 20_021_122)
-        # makespan_JOCR, collisions_JOCR, locations_JOCR, focal_route, clusters = run_JOCR_exp(env, seed, render=False)
-        # JOCR_exp_row = pd.DataFrame([{
-        #     'exp_name': f"JOCR_{exp_no}", 
-        #     'seed': seed, 
-        #     'locations': locations_JOCR, 
-        #     'num_uavs': { 'num_uavs_0': num_uavs_0, 'num_uavs_1': num_uavs_1 }, 
-        #     'num_customers': { 'truck': num_parcels_truck, 'both': num_customer_both, 'uav': num_parcels_uav }, 
-        #     'num_obstacles': { 'buildings': num_uav_obstacle, 'no_fly_zone': num_no_fly_zone }, 
-        #     'focal_route': focal_route, 
-        #     'cluster_assignments': clusters, 
-        #     'makespan': makespan_JOCR, 
-        #     'collisions_obstacle': collisions_JOCR[0], 
-        #     'collision_uavs': collisions_JOCR[1],
-        # }])
-        # df_JOCR = pd.concat([df_JOCR, JOCR_exp_row], ignore_index=True)
+    
+    for num_parcels, num_parcels_truck, num_parcels_uav in customer_params_set:
+        num_customer_both = num_parcels - num_parcels_truck - num_parcels_uav
+        for num_uavs_0, num_uavs_1 in uav_params_set:
+            num_uavs = num_uavs_0 + num_uavs_1
+            for num_uav_obstacle, num_no_fly_zone in obstacle_params_set:
+                env = DeliveryEnvironmentWithObstacle(
+                    step_len=step_len, 
+                    truck_velocity=truck_velocity, 
+                    uav_velocity=uav_velocity, 
+                    uav_capacity=uav_capacity, 
+                    uav_range=uav_range, 
+                    uav_obs_range=uav_obs_range, 
+                    num_truck=num_truck, 
+                    num_uavs=num_uavs, 
+                    num_uavs_0=num_uavs_0, 
+                    num_uavs_1=num_uavs_1, 
+                    num_parcels=num_parcels, 
+                    num_parcels_truck=num_parcels_truck, 
+                    num_parcels_uav=num_parcels_uav, 
+                    num_uav_obstacle=num_uav_obstacle, 
+                    num_no_fly_zone=num_no_fly_zone, 
+                    render_mode=None
+                )
+    
+                for exp_no in range(num_experiments):
+                    seed = int(seed_seq[exp_no])
+                    # print(seed)
+                    
+                    # **CTDRSP**
+                    # for _ in range(20):
+                    # seed = random.randint(1, 20_021_122)
+                    #     print(seed)
+                    makespan_CTDRSP, collisions_CTDRSP, locations_CTDRSP, route_CTDRSP, assignments_CTDRSP = run_CTDRSP_exp(env, seed, render=False)
+                    CTDRSP_exp_row = pd.DataFrame([{
+                        'exp_name': f"CTDRSP_{exp_no}", 
+                        'seed': seed, 
+                        'locations': locations_CTDRSP, # { 'x': locations_CTDRSP[:, 0], 'y': locations_CTDRSP[:, 1] }, 
+                        'num_uavs': { 'num_uavs_0': num_uavs_0, 'num_uavs_1': num_uavs_1 }, 
+                        'num_customers': { 'truck': num_parcels_truck, 'both': num_customer_both, 'uav': num_parcels_uav }, 
+                        'num_obstacles': { 'buildings': num_uav_obstacle, 'no_fly_zone': num_no_fly_zone }, 
+                        'route': route_CTDRSP, 
+                        'assignments': assignments_CTDRSP, 
+                        'makespan': makespan_CTDRSP, 
+                        'collisions_obstacle': collisions_CTDRSP[0], 
+                        'collision_uavs': collisions_CTDRSP[1],
+                    }], columns=columns_CTDRSP)
+                    df_CTDRSP = pd.concat([df_CTDRSP, CTDRSP_exp_row], ignore_index=True)
+                    # observations, infos = env.reset()
+                    # delivery_upper_solver = upper_solver(observations["truck"]["pos_obs"], num_customer_both, num_parcels_truck, num_parcels_uav, num_uavs)
+                    
+                    # delivery_upper_solver.solve_CTDRSP(num_uavs_0, num_uavs_1, uav_velocity, uav_range * 0.2, truck_velocity)
+                    
+                    # **MFSTSP**
+                    # for i in range(20):
+                    # seed = random.randint(1, 20_021_122)
+                    # print(seed)
+                    makespan_MFSTSP, collisions_MFSTSP, locations_MFSTSP, route_MFSTSP, assignments_MFSTSP = run_MFSTSP_exp(env, seed, render=False)
+                    MFSTSP_exp_row = pd.DataFrame([{
+                        'exp_name': f"MFSTSP_{exp_no}", 
+                        'seed': seed, 
+                        'locations': locations_MFSTSP, 
+                        'num_uavs': { 'num_uavs_0': num_uavs_0, 'num_uavs_1': num_uavs_1 }, 
+                        'num_customers': { 'truck': num_parcels_truck, 'both': num_customer_both, 'uav': num_parcels_uav }, 
+                        'num_obstacles': { 'buildings': num_uav_obstacle, 'no_fly_zone': num_no_fly_zone }, 
+                        'route': route_MFSTSP, 
+                        'assignments': assignments_MFSTSP, 
+                        'makespan': makespan_MFSTSP, 
+                        'collisions_obstacle': collisions_MFSTSP[0], 
+                        'collision_uavs': collisions_MFSTSP[1],
+                    }])
+                    df_MFSTSP = pd.concat([df_MFSTSP, MFSTSP_exp_row], ignore_index=True)
+                    # observations, infos = env.reset()
+                    # delivery_upper_solver = upper_solver(observations["truck"]["pos_obs"], num_customer_both, num_parcels_truck, num_parcels_uav, num_uavs)
+                    
+                    # print(delivery_upper_solver.solve_MFSTSP(num_uavs_0, num_uavs_1, uav_velocity, uav_capacity, truck_velocity))
+                    
+                    # **JOCR**
+                    # seed = random.randint(1, 20_021_122)
+                    makespan_JOCR, collisions_JOCR, locations_JOCR, focal_route, clusters = run_JOCR_exp(env, seed, render=False)
+                    JOCR_exp_row = pd.DataFrame([{
+                        'exp_name': f"JOCR_{exp_no}", 
+                        'seed': seed, 
+                        'locations': locations_JOCR, 
+                        'num_uavs': { 'num_uavs_0': num_uavs_0, 'num_uavs_1': num_uavs_1 }, 
+                        'num_customers': { 'truck': num_parcels_truck, 'both': num_customer_both, 'uav': num_parcels_uav }, 
+                        'num_obstacles': { 'buildings': num_uav_obstacle, 'no_fly_zone': num_no_fly_zone }, 
+                        'focal_route': focal_route, 
+                        'cluster_assignments': clusters, 
+                        'makespan': makespan_JOCR, 
+                        'collisions_obstacle': collisions_JOCR[0], 
+                        'collision_uavs': collisions_JOCR[1],
+                    }])
+                    df_JOCR = pd.concat([df_JOCR, JOCR_exp_row], ignore_index=True)
     
     df_CTDRSP.to_csv(os.path.join(exp_folder_path, "CTDRSP_experiments.csv"))
     df_MFSTSP.to_csv(os.path.join(exp_folder_path, "MFSTSP_experiments.csv"))
@@ -1209,24 +1217,49 @@ if __name__ == "__main__":
     
     columns_OURS = ['exp_name', 'seed', 'locations', 'num_uavs', 'num_customers', 'num_obstacles', 'heuristic_truck_route', 'makespan', 'collisions_obstacle', 'collision_uavs']
     df_OURS = pd.DataFrame(columns=columns_OURS)
-    for exp_no in range(num_experiments):
-    # seed = random.randint(1, 20_021_122)
-        seed = int(seed_seq[exp_no])
-        # makespan_OURS, collisions_OURS, locations_OURS = run_hierarchical_exp(env, masac_agent, seed, heuristic=False, render=False)
-        makespan_OURS, collisions_OURS, locations_OURS, truck_route = run_hierarchical_exp(env, masac_agent, seed, render=False)
-        exp_row = pd.DataFrame([{
-            'exp_name': f"OURS_{exp_no}", 
-            'seed': seed, 
-            'locations': locations_OURS, 
-            'num_uavs': { 'num_uavs_0': num_uavs_0, 'num_uavs_1': num_uavs_1 }, 
-            'num_customers': { 'truck': num_parcels_truck, 'both': num_customer_both, 'uav': num_parcels_uav }, 
-            'num_obstacles': { 'buildings': num_uav_obstacle, 'no_fly_zone': num_no_fly_zone }, 
-            'heuristic_truck_route': truck_route, 
-            'makespan': makespan_OURS, 
-            'collisions_obstacle': collisions_OURS[0], 
-            'collision_uavs': collisions_OURS[1],
-        }])
-        df_OURS = pd.concat([df_OURS, exp_row], ignore_index=True)
+    
+    for num_parcels, num_parcels_truck, num_parcels_uav in customer_params_set:
+        num_customer_both = num_parcels - num_parcels_truck - num_parcels_uav
+        for num_uavs_0, num_uavs_1 in uav_params_set:
+            num_uavs = num_uavs_0 + num_uavs_1
+            for num_uav_obstacle, num_no_fly_zone in obstacle_params_set:
+                env = DeliveryEnvironmentWithObstacle(
+                    step_len=step_len, 
+                    truck_velocity=truck_velocity, 
+                    uav_velocity=uav_velocity, 
+                    uav_capacity=uav_capacity, 
+                    uav_range=uav_range, 
+                    uav_obs_range=uav_obs_range, 
+                    num_truck=num_truck, 
+                    num_uavs=num_uavs, 
+                    num_uavs_0=num_uavs_0, 
+                    num_uavs_1=num_uavs_1, 
+                    num_parcels=num_parcels, 
+                    num_parcels_truck=num_parcels_truck, 
+                    num_parcels_uav=num_parcels_uav, 
+                    num_uav_obstacle=num_uav_obstacle, 
+                    num_no_fly_zone=num_no_fly_zone, 
+                    render_mode=None
+                )
+    
+                for exp_no in range(num_experiments):
+                # seed = random.randint(1, 20_021_122)
+                    seed = int(seed_seq[exp_no])
+                    # makespan_OURS, collisions_OURS, locations_OURS = run_hierarchical_exp(env, masac_agent, seed, heuristic=False, render=False)
+                    makespan_OURS, collisions_OURS, locations_OURS, truck_route = run_hierarchical_exp(env, masac_agent, seed, render=False)
+                    exp_row = pd.DataFrame([{
+                        'exp_name': f"OURS_{exp_no}", 
+                        'seed': seed, 
+                        'locations': locations_OURS, 
+                        'num_uavs': { 'num_uavs_0': num_uavs_0, 'num_uavs_1': num_uavs_1 }, 
+                        'num_customers': { 'truck': num_parcels_truck, 'both': num_customer_both, 'uav': num_parcels_uav }, 
+                        'num_obstacles': { 'buildings': num_uav_obstacle, 'no_fly_zone': num_no_fly_zone }, 
+                        'heuristic_truck_route': truck_route, 
+                        'makespan': makespan_OURS, 
+                        'collisions_obstacle': collisions_OURS[0], 
+                        'collision_uavs': collisions_OURS[1],
+                    }])
+                    df_OURS = pd.concat([df_OURS, exp_row], ignore_index=True)
     df_OURS.to_csv(os.path.join(exp_folder_path, "OURS_experiments.csv"))
 
     env.close()

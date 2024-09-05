@@ -132,7 +132,7 @@ class MFSTSPUpperSolver():
 		# print('The mFSTSP Heuristic is Done.  It returned something')
 		
 		self.truck_tour = []
-		# self.assignments_uav = []
+		self.assignments_uav = []
 		# launchs = []
 		# retrieves = []
 		for v in assignments:
@@ -142,13 +142,13 @@ class MFSTSPUpperSolver():
 						vehicleType = 'Truck'
 						if (assignments[v][statusID][statusIndex].ganttStatus == GANTT_TRAVEL):
 							self.truck_tour.append((assignments[v][statusID][statusIndex].startNodeID, assignments[v][statusID][statusIndex].endNodeID))
-					# else:
-					# 	vehicleType = 'UAV'
-					# 	if (assignments[v][statusID][statusIndex].ganttStatus == GANTT_TRAVEL):
-					# 		if (statusID == TRAVEL_UAV_PACKAGE):
-					# 			launchs.append((v - 2, assignments[v][statusID][statusIndex].startNodeID, assignments[v][statusID][statusIndex].endNodeID))
-					# 		elif (statusID == TRAVEL_UAV_EMPTY):
-					# 			retrieves.append((assignments[v][statusID][statusIndex].startNodeID, assignments[v][statusID][statusIndex].endNodeID))
+					else:
+						vehicleType = 'UAV'
+						if (assignments[v][statusID][statusIndex].ganttStatus == GANTT_TRAVEL):
+							if (statusID == TRAVEL_UAV_PACKAGE):
+								self.assignments_uav.append((v - 2, assignments[v][statusID][statusIndex].startNodeID, assignments[v][statusID][statusIndex].endNodeID))
+							# elif (statusID == TRAVEL_UAV_EMPTY):
+							# 	retrieves.append((assignments[v][statusID][statusIndex].startNodeID, assignments[v][statusID][statusIndex].endNodeID))
 					
 					# [v, vehicleType, assignments[v][statusID][statusIndex].startTime, assignments[v][statusID][statusIndex].startNodeID, assignments[v][statusID][statusIndex].endTime, assignments[v][statusID][statusIndex].endNodeID, assignments[v][statusID][statusIndex].description]	
 		
@@ -156,7 +156,7 @@ class MFSTSPUpperSolver():
 		# 	for cust, end_node in retrieves: 
 		# 		if customer == cust:
 		# 			self.assignments_uav.append((v, start_node, customer, end_node))
-		# print(self.truck_tour)
+		# print(self.truck_tour, self.assignments_uav)
 		# print("Done.")
 
 
@@ -219,7 +219,7 @@ class MFSTSPUpperSolver():
 
 
 	def get_solution(self):
-		return self.truck_tour
+		return self.truck_tour, self.assignments_uav
 
 
 if __name__ == '__main__':

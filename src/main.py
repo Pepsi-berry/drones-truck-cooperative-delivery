@@ -48,7 +48,7 @@ class upper_solver():
         self.num_uavs = num_uavs
         self.customer_pos_truck = pos_obs[2 + self.num_uavs :]
         self.customer_pos_uav = pos_obs[2 + self.num_uavs + self.num_truck_customer :]
-        self.truck_route = None
+        self.truck_route = []
         
     # idea 1: launch a uav to a customer point when there is a uav available, 
     # and a customer point which is closer than the suitable distance limitation from truck 
@@ -212,12 +212,12 @@ class upper_solver():
         route_indices = [ index - 1 - self.num_truck_customer for index in self.truck_route ]
         # print(np.flip(uav_task_dists_order))
         for idx in np.flip(uav_task_dists_order): 
-            if uav_task_dists[idx] < uav_range[0] * 0.2 and uav_action_masks[0][idx]:
+            if uav_task_dists[idx] < uav_range[0] * 0.25 and uav_action_masks[0][idx]:
                 if idx in route_indices:
                     route_uav_0_queue.append(idx)
                 else:
                     task_uav_0_queue.append(idx)
-            if uav_task_dists[idx] < uav_range[1] * 0.2 and uav_action_masks[1][idx]:
+            if uav_task_dists[idx] < uav_range[1] * 0.25 and uav_action_masks[1][idx]:
                 if idx in route_indices:
                     route_uav_1_queue.append(idx)
                 else:
@@ -280,7 +280,7 @@ class upper_solver():
         return actions
     
     
-    def solve_heuristic(self, num_uav_0, num_uav_1, uav_velocity, uav_capacity, truck_velocity):
+    def solve_heuristic_0(self, num_uav_0, num_uav_1, uav_velocity, uav_capacity, truck_velocity):
         uavs = [0] * num_uav_0 + [1] * num_uav_1
         uav_range_mfstsp = ["low", "high"]
         uav_infos = [
@@ -301,7 +301,7 @@ class upper_solver():
         masks[:, self.num_truck_customer + 1:] = 1
         
         upper_solver = MFSTSPUpperSolver(self.num_uavs, uavs, uav_infos, locations, manhattan_dist_matrix, truck_velocity, masks)
-        tour = upper_solver.get_solution()
+        tour, assignments = upper_solver.get_solution()
         
         tour_dict = { start: end for start, end in tour }
         node = 0
@@ -313,8 +313,113 @@ class upper_solver():
         # route.reverse()
         
         self.truck_route = route
-        return route
+        return route, assignments
     
+    
+    # return a (uav, customer) tuple
+    def solve_heuristic_1(self, global_obs, agent_infos, uav_range, last_node, curr_node, assignments):
+        if curr_node == -1:
+            return self.solve_greedy(global_obs, agent_infos, uav_range)
+        # parameter initialization
+        uav_position = global_obs["pos_obs"][1]
+        uav_action_masks = global_obs["uav_action_masks"]
+        task_uav_0_queue = []
+        task_uav_1_queue = []
+        task_uav_0_queue_urgent = []
+        task_uav_1_queue_urgent = []
+        uav_0_avail_queue = []
+        uav_1_avail_queue = []
+        
+        for agent_info in agent_infos:
+            if agent_infos[agent_info]:
+                if match("uav_0", agent_info):
+                    uav_0_avail_queue.append(agent_info)
+                elif match("uav_1", agent_info):
+                    uav_1_avail_queue.append(agent_info)
+        
+        # get feasible sorties
+        for _, start_node, cust in assignments:
+            # (urgent, that is should have launch at last node)
+            if start_node == last_node:
+                # if uav < num_uav_0:
+                if uav_action_masks[0][cust - self.num_truck_customer - 1]:
+                    task_uav_0_queue_urgent.append(cust)
+                # else:
+                if uav_action_masks[1][cust - self.num_truck_customer - 1]:
+                    task_uav_1_queue_urgent.append(cust)
+            
+            if start_node == curr_node:
+                # if uav < num_uav_0:
+                if uav_action_masks[0][cust - self.num_truck_customer - 1]:
+                    task_uav_0_queue.append(cust)
+                # else:
+                if uav_action_masks[1][cust - self.num_truck_customer - 1]:
+                    task_uav_1_queue.append(cust)
+        
+        actions = {}
+        
+        
+        if task_uav_0_queue_urgent:
+            # uav_0
+            dist_task_uav_0 = np.linalg.norm(
+                self.customer_pos_truck[np.array(task_uav_0_queue_urgent) - 1] - uav_position, 
+                axis=1
+            )
+            min_index_uav_0 = np.argmin(dist_task_uav_0)
+            min_distance_uav_0 = dist_task_uav_0[min_index_uav_0]
+            if min_distance_uav_0 < uav_range[0] * 0.25:
+                for name_uav_0 in uav_0_avail_queue:
+                    actions[name_uav_0] = task_uav_0_queue_urgent[min_index_uav_0] - self.num_truck_customer - 1
+                    return actions
+        
+        if task_uav_1_queue_urgent:
+            # check constrains satisfied and return closest feasible customer
+            # uav_1(faster, further, lighter)
+            dist_task_uav_1 = np.linalg.norm(
+                self.customer_pos_truck[np.array(task_uav_1_queue_urgent) - 1] - uav_position, 
+                axis=1
+            )
+            min_index_uav_1 = np.argmin(dist_task_uav_1)
+            min_distance_uav_1 = dist_task_uav_1[min_index_uav_1]
+            if min_distance_uav_1 < uav_range[1] * 0.25:
+                for name_uav_1 in uav_1_avail_queue:
+                    actions[name_uav_1] = task_uav_1_queue_urgent[min_index_uav_1] - self.num_truck_customer - 1
+                    return actions        
+        
+        if task_uav_0_queue:
+            # uav_0
+            dist_task_uav_0 = np.linalg.norm(
+                self.customer_pos_truck[np.array(task_uav_0_queue) - 1] - uav_position, 
+                axis=1
+            )
+            min_index_uav_0 = np.argmin(dist_task_uav_0)
+            min_distance_uav_0 = dist_task_uav_0[min_index_uav_0]
+            if min_distance_uav_0 < uav_range[0] * 0.25:
+                for name_uav_0 in uav_0_avail_queue:
+                    actions[name_uav_0] = task_uav_0_queue[min_index_uav_0] - self.num_truck_customer - 1
+                    return actions
+        
+        if task_uav_1_queue:
+            # check constrains satisfied and return closest feasible customer
+            # uav_1(faster, further, lighter)
+            dist_task_uav_1 = np.linalg.norm(
+                self.customer_pos_truck[np.array(task_uav_1_queue) - 1] - uav_position, 
+                axis=1
+            )
+            min_index_uav_1 = np.argmin(dist_task_uav_1)
+            min_distance_uav_1 = dist_task_uav_1[min_index_uav_1]
+            if min_distance_uav_1 < uav_range[1] * 0.25:
+                for name_uav_1 in uav_1_avail_queue:
+                    actions[name_uav_1] = task_uav_1_queue[min_index_uav_1] - self.num_truck_customer - 1
+                    return actions
+                    
+        if len(uav_1_avail_queue) > max(self.num_uavs / 4, 2):
+            return self.solve_greedy(global_obs, agent_infos, uav_range * 0.4)
+        else:
+            # greedy research when no feasible sorties
+            return {}
+
+        
     
     def build_CTDRSP(self):
         num_flexible_location = self.num_customer * 1
@@ -783,26 +888,57 @@ def run_CTDRSP_exp(env, seed, max_iter=3_000, render=None, video_record=False):
 def run_hierarchical_exp(env, model, seed, max_iter=3_000, heuristic=True, render=None, video_record=False):
     num_collisions = [0, 0]
 
-    observations, infos = env.reset(seed=seed)
+    observations, infos = env.reset(seed=seed, options=1)
     delivery_upper_solver = upper_solver(observations["truck"]["pos_obs"], num_customer_both, num_parcels_truck, num_parcels_uav, num_uavs)
 
-    truck_route = delivery_upper_solver.solve_heuristic(num_uavs_0, num_uavs_1, uav_velocity, uav_capacity, truck_velocity)
+    truck_route, assignments = delivery_upper_solver.solve_heuristic_0(num_uavs_0, num_uavs_1, uav_velocity, uav_capacity, truck_velocity)
+    truck_route_copy = copy(truck_route)
+    truck_route.append(-1) # terminator
     print(truck_route)
     
-    TA_Scheduling_action = delivery_upper_solver.solve_greedy(observations["truck"], infos['is_ready'], uav_range)
-    if heuristic and truck_route and 'truck' in TA_Scheduling_action:
-        TA_Scheduling_action['truck'] = truck_route.pop(0)
-    # for k in TA_Scheduling_action:
-    #     print(type(TA_Scheduling_action[k]))
+    last_node = 0
+    curr_node = truck_route[0]
+    
+    if heuristic and curr_node != -1:
+        TA_Scheduling_action = delivery_upper_solver.solve_heuristic_1(
+            observations["truck"], 
+            infos['is_ready'], 
+            uav_range, 
+            last_node, 
+            curr_node, 
+            assignments
+        )
+        # if 'truck' in TA_Scheduling_action:
+        if infos['is_ready']["truck"]:
+            TA_Scheduling_action['truck'] = truck_route.pop(0)
+    else:
+        TA_Scheduling_action = delivery_upper_solver.solve_greedy(observations["truck"], infos['is_ready'], uav_range)
+
+    # print(TA_Scheduling_action)
     env.TA_Scheduling(TA_Scheduling_action)
     observations, _, _, _, infos = env.step({})
     
     for i in range(max_iter):
         # this is where you would insert your policy
         if infos['is_ready']["truck"] or (i % 5 == 4):
-            TA_Scheduling_action = delivery_upper_solver.solve_greedy(observations["truck"], infos['is_ready'], uav_range)
-            if heuristic and truck_route and 'truck' in TA_Scheduling_action:
-                TA_Scheduling_action['truck'] = truck_route.pop(0)
+            if heuristic and curr_node != -1:
+                if infos['is_ready']["truck"]:
+                    last_node = curr_node
+                    curr_node = truck_route.pop(0)
+                TA_Scheduling_action = delivery_upper_solver.solve_heuristic_1(
+                    observations["truck"], 
+                    infos['is_ready'], 
+                    uav_range, 
+                    last_node, 
+                    curr_node, 
+                    assignments
+                )
+                if infos['is_ready']["truck"] and curr_node != -1:
+                    TA_Scheduling_action['truck'] = curr_node
+            else:
+                TA_Scheduling_action = delivery_upper_solver.solve_greedy(observations["truck"], infos['is_ready'], uav_range)
+            
+            # print(TA_Scheduling_action)
             env.TA_Scheduling(TA_Scheduling_action)
 
         actions = {
@@ -823,13 +959,13 @@ def run_hierarchical_exp(env, model, seed, max_iter=3_000, heuristic=True, rende
             print("finish in : ", i)
             # print("conflict with obstacle ", num_collisions[0], " times.")
             # print("conflict with uav ", num_collisions[1], " times.")
-            return i, num_collisions, np.concatenate(([delivery_upper_solver.warehouse_pos], delivery_upper_solver.customer_pos_truck)), truck_route
+            return i, num_collisions, np.concatenate(([delivery_upper_solver.warehouse_pos], delivery_upper_solver.customer_pos_truck)), truck_route_copy
         if render and i % 8 == 0:
             env.render()
     # print("conflict with obstacle ", num_collisions[0], " times.")
     # print("conflict with uav ", num_collisions[1], " times.")
     
-    return 0, [0, 0], np.concatenate(([delivery_upper_solver.warehouse_pos], delivery_upper_solver.customer_pos_truck)), truck_route
+    return 0, [0, 0], np.concatenate(([delivery_upper_solver.warehouse_pos], delivery_upper_solver.customer_pos_truck)), truck_route_copy
 
 
 if __name__ == "__main__":    
@@ -839,7 +975,7 @@ if __name__ == "__main__":
     # uav parameters
     # unit here is m/s
     truck_velocity = 6
-    uav_velocity = np.array([12, 20])
+    uav_velocity = np.array([12, 29])
     # unit here is kg
     uav_capacity = np.array([10, 3.6])
     # unit here is m
@@ -944,7 +1080,7 @@ if __name__ == "__main__":
     num_experiments = 10
     seed_range = 20_021_122
     seed_seq = np.random.randint(1, seed_range, size=num_experiments)
-    # seed_seq = np.array([10016636, 242453])
+    seed_seq = np.array([8871826, 15977745, 5886647, 13938431, 19922194, 4766029, 10447930, 19715139, 1720642, 15437063])
     print(seed_seq.tolist())
 
     for exp_no in range(num_experiments):
@@ -1001,21 +1137,21 @@ if __name__ == "__main__":
         
         # **JOCR**
         # seed = random.randint(1, 20_021_122)
-        makespan_JOCR, collisions_JOCR, locations_JOCR, focal_route, clusters = run_JOCR_exp(env, seed, render=False)
-        JOCR_exp_row = pd.DataFrame([{
-            'exp_name': f"JOCR_{exp_no}", 
-            'seed': seed, 
-            'locations': locations_JOCR, 
-            'num_uavs': { 'num_uavs_0': num_uavs_0, 'num_uavs_1': num_uavs_1 }, 
-            'num_customers': { 'truck': num_parcels_truck, 'both': num_customer_both, 'uav': num_parcels_uav }, 
-            'num_obstacles': { 'buildings': num_uav_obstacle, 'no_fly_zone': num_no_fly_zone }, 
-            'focal_route': focal_route, 
-            'cluster_assignments': clusters, 
-            'makespan': makespan_JOCR, 
-            'collisions_obstacle': collisions_JOCR[0], 
-            'collision_uavs': collisions_JOCR[1],
-        }])
-        df_JOCR = pd.concat([df_JOCR, JOCR_exp_row], ignore_index=True)
+        # makespan_JOCR, collisions_JOCR, locations_JOCR, focal_route, clusters = run_JOCR_exp(env, seed, render=False)
+        # JOCR_exp_row = pd.DataFrame([{
+        #     'exp_name': f"JOCR_{exp_no}", 
+        #     'seed': seed, 
+        #     'locations': locations_JOCR, 
+        #     'num_uavs': { 'num_uavs_0': num_uavs_0, 'num_uavs_1': num_uavs_1 }, 
+        #     'num_customers': { 'truck': num_parcels_truck, 'both': num_customer_both, 'uav': num_parcels_uav }, 
+        #     'num_obstacles': { 'buildings': num_uav_obstacle, 'no_fly_zone': num_no_fly_zone }, 
+        #     'focal_route': focal_route, 
+        #     'cluster_assignments': clusters, 
+        #     'makespan': makespan_JOCR, 
+        #     'collisions_obstacle': collisions_JOCR[0], 
+        #     'collision_uavs': collisions_JOCR[1],
+        # }])
+        # df_JOCR = pd.concat([df_JOCR, JOCR_exp_row], ignore_index=True)
     
     df_CTDRSP.to_csv(os.path.join(exp_folder_path, "CTDRSP_experiments.csv"))
     df_MFSTSP.to_csv(os.path.join(exp_folder_path, "MFSTSP_experiments.csv"))
@@ -1069,7 +1205,7 @@ if __name__ == "__main__":
         .resources(num_gpus=0)
         )
     masac_agent = SAC(config=config)
-    masac_agent.restore('training/models/SAC_best_checkpoint_12_1000_160')
+    masac_agent.restore('training/models/SAC_best_checkpoint_12_1000_137')
     
     columns_OURS = ['exp_name', 'seed', 'locations', 'num_uavs', 'num_customers', 'num_obstacles', 'heuristic_truck_route', 'makespan', 'collisions_obstacle', 'collision_uavs']
     df_OURS = pd.DataFrame(columns=columns_OURS)

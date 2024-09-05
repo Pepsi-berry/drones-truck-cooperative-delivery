@@ -106,8 +106,8 @@ class MultiUAVsTrainingEnvironmentWithObstacle(ParallelEnv):
         
         
         # map parameters
-        self.map_size = 10_000 # m as unit here
-        self.grid_edge = 250 # m as unit here
+        self.map_size = 5_000 # m as unit here
+        self.grid_edge = 125 # m as unit here
         
         # obstacle parameters
         self.num_uav_obstacle = num_uav_obstacle
@@ -659,9 +659,10 @@ class MultiUAVsTrainingEnvironmentWithObstacle(ParallelEnv):
     def denormalize_action(self, actions):
         # print("action infos", actions)
         for agent in actions:
+            uav_type = self.get_uav_info(agent)[0]
             actions[agent].setflags(write=True)
             actions[agent][0] = actions[agent][0] * np.pi + np.pi
-            actions[agent][1] = actions[agent][1] * (self.uav_velocity[1]) / 2 + (self.uav_velocity[1]) / 2
+            actions[agent][1] = actions[agent][1] * (self.uav_velocity[uav_type]) / 2 + (self.uav_velocity[uav_type]) / 2
 
 
     def step(self, actions):

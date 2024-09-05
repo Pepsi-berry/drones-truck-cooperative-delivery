@@ -511,8 +511,9 @@ class DeliveryEnvironmentWithObstacle(ParallelEnv):
         # to customer_both —— to customer_uav
         #      10 here     ——      6 here    
         self.parcels_weight = np.array([
-            self.generate_weight(0, 3.6, 6, 10) if idx < self.num_customer_both
-            else self.generate_weight(0, 3.6, 6, 10) # to make sure all the uav parcel can be delivered
+            # (0, 3.6, 6, 10)
+            self.generate_weight(0, 1, 2, 3.6) if idx < self.num_customer_both
+            else self.generate_weight(0, 1, 2, 3.6) # to make sure all the uav parcel can be delivered
             for idx in range(self.num_customer_uav)
             ])
         

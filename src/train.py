@@ -167,8 +167,10 @@ if __name__ == "__main__":
     def policy_mapping_fn(agent_id, episode, worker, **kwargs):
         # print("worker: ", worker)
         # print("episode: ", episode)
-        if agent_id.startswith("uav"):
-            return "masac_policy"
+        if agent_id.startswith("uav_0"):
+            return "masac_policy_uav_0"
+        elif agent_id.startswith("uav_1"):
+            return "masac_policy_uav_1"
         else:
             raise ValueError("Unknown agent type: ", agent_id)
     
@@ -221,7 +223,13 @@ if __name__ == "__main__":
         # .rl_module()
         .multi_agent(
             policies={
-                "masac_policy": PolicySpec(
+                "masac_policy_uav_0": PolicySpec(
+                policy_class=None,  # infer automatically from Algorithm
+                observation_space=None,  # infer automatically from env
+                action_space=None,  # infer automatically from env
+                config={},  # use main config plus <- this override here
+                ),
+                "masac_policy_uav_1": PolicySpec(
                 policy_class=None,  # infer automatically from Algorithm
                 observation_space=None,  # infer automatically from env
                 action_space=None,  # infer automatically from env

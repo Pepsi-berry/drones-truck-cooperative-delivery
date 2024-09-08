@@ -216,6 +216,8 @@ class DeliveryEnvironmentWithObstacle(ParallelEnv):
         # which is used to detect path intersections and determine conflicts between uavs.
         self.uav_positions_transfer = None
         
+        self.uav_collision_penalty = None
+        
         # 1(warehouse) + 1(truck itself)
         ###########################################################################################
         # 1(uav info: no. and velocity) + 1(dist_uav and dist_obstacle)
@@ -504,6 +506,7 @@ class DeliveryEnvironmentWithObstacle(ParallelEnv):
         self.truck_target_position = np.ones(2) * -1
         self.truck_path = []
         self.uav_positions_transfer = []
+        self.uav_collision_penalty = []
         
         # parcel weights probability distribution: 
         # <= 3.6kg: 0.8, 3.6kg - 10kg: 0.1, > 10kg: 0.1
@@ -828,7 +831,7 @@ class DeliveryEnvironmentWithObstacle(ParallelEnv):
         for obstacle in self.uav_obstacles:
             # if insersect or not
             if self.uav_tjc_zone_intersect(obstacle, src_pos, self.uav_position[uav_no]):
-                self.uav_position[uav_no] = obstacle[0] + obstacle[1] / 2
+                # self.uav_position[uav_no] = obstacle[0] + obstacle[1] / 2
                 return -2
             
         # check if the line conflict occured
@@ -976,6 +979,10 @@ class DeliveryEnvironmentWithObstacle(ParallelEnv):
                 if self.uav_stages[self.uav_name_mapping[agent]] != -1:
                     rewards[agent] += max((self.uav_velocity[1] * 0.4) - actions[agent][1], 0) * REWARD_SLOW
                     
+                    if agent in self.uav_collision_penalty:
+                        self.uav_collision_penalty.remove(agent)
+                        continue
+                    
                     uav_moving_result = self.uav_move(agent, actions[agent])
                     
                     # uav's dead battery to be complete, not process for now
@@ -1008,7 +1015,8 @@ class DeliveryEnvironmentWithObstacle(ParallelEnv):
                         rewards[agent] += REWARD_UAV_ARRIVAL
                     elif uav_moving_result == -1:
                         rewards[agent] += REWARD_UAV_VIOLATE
-                        self.uav_position[uav_no] = positions_before[uav_no]
+                        self.uav_collision_penalty.append(agent)
+                        # self.uav_position[uav_no] = positions_before[uav_no]
                         self.infos['collisions_with_obstacle'] += 1
                     elif uav_moving_result == -2:
                         # give negative reward without removing uav to improve training stability
@@ -1016,7 +1024,8 @@ class DeliveryEnvironmentWithObstacle(ParallelEnv):
                         # self.dead_agent_list.append(agent)
                         # self.infos.pop(agent)
                         rewards[agent] += REWARD_UAV_WRECK
-                        self.uav_position[uav_no] = positions_before[uav_no]
+                        self.uav_collision_penalty.append(agent)
+                        # self.uav_position[uav_no] = positions_before[uav_no]
                         self.infos['collisions_with_obstacle'] += 1
                     elif uav_moving_result == 0:
                         # calculate the distance before the uav moves, 
@@ -1051,6 +1060,8 @@ class DeliveryEnvironmentWithObstacle(ParallelEnv):
         for traj_l, traj_r in combinations(self.uav_positions_transfer, 2):
             if not self.uav_safe_distance_detection(traj_l, traj_r, 10):
                 self.infos['collisions_with_uav'] += 2
+                self.uav_collision_penalty.append(traj_l[-1])
+                self.uav_collision_penalty.append(traj_r[-1])
                 # rewards[traj_l[-1]] += REWARD_UAV_WRECK
                 # rewards[traj_r[-1]] += REWARD_UAV_WRECK
         

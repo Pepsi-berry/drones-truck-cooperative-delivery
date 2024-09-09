@@ -308,8 +308,8 @@ class DeliveryEnvironmentWithObstacle(ParallelEnv):
     
     # Obstacles need to be situated inside the road grid and preferably should not intersect with the road
     def generate_uav_obstacle(self, grid_num):
-        upper_left_corner = np.array([self.RNG.integers(grid_num * 0.2, grid_num * 0.8) * self.grid_edge + self.RNG.integers(self.grid_edge * 0.2, self.grid_edge * 0.4), 
-                          self.RNG.integers(grid_num * 0.2, grid_num * 0.8) * self.grid_edge + self.RNG.integers(self.grid_edge * 0.2, self.grid_edge * 0.4)])
+        upper_left_corner = np.array([self.RNG.integers(grid_num * 0.1, grid_num * 0.9) * self.grid_edge + self.RNG.integers(self.grid_edge * 0.2, self.grid_edge * 0.4), 
+                          self.RNG.integers(grid_num * 0.1, grid_num * 0.9) * self.grid_edge + self.RNG.integers(self.grid_edge * 0.2, self.grid_edge * 0.4)])
         obstacle_size = self.RNG.integers(int(self.grid_edge * 0.3), int(self.grid_edge * 0.5))
         
         return np.array([upper_left_corner, [obstacle_size, obstacle_size]])
@@ -470,8 +470,8 @@ class DeliveryEnvironmentWithObstacle(ParallelEnv):
         # All customer points are distributed at the edge of the road grid
         grid_num = self.map_size / self.grid_edge
         self.customer_position_truck = np.array(
-            [[self.RNG.integers(0.25 * self.map_size, 0.75 * self.map_size), self.RNG.integers(0.25 * grid_num, 0.75 * grid_num)*self.grid_edge] if i % 2 
-             else [self.RNG.integers(0.25 * grid_num, 0.75 * grid_num)*self.grid_edge, self.RNG.integers(0.25 * self.map_size, 0.75 * self.map_size)] 
+            [[self.RNG.integers(0.2 * self.map_size, 0.8 * self.map_size), self.RNG.integers(0.2 * grid_num, 0.8 * grid_num)*self.grid_edge] if i % 2 
+             else [self.RNG.integers(0.2 * grid_num, 0.8 * grid_num)*self.grid_edge, self.RNG.integers(0.2 * self.map_size, 0.8 * self.map_size)] 
              for i in range(self.num_parcels_truck)], dtype=np.int32
             )
         self.customer_position_uav = np.array(
@@ -506,7 +506,7 @@ class DeliveryEnvironmentWithObstacle(ParallelEnv):
         self.truck_target_position = np.ones(2) * -1
         self.truck_path = []
         self.uav_positions_transfer = []
-        self.uav_collision_penalty = []
+        self.uav_collision_penalty = { uav: 0 for uav in self.agents if match("uav", uav)}
         
         # parcel weights probability distribution: 
         # <= 3.6kg: 0.8, 3.6kg - 10kg: 0.1, > 10kg: 0.1
@@ -979,8 +979,8 @@ class DeliveryEnvironmentWithObstacle(ParallelEnv):
                 if self.uav_stages[self.uav_name_mapping[agent]] != -1:
                     rewards[agent] += max((self.uav_velocity[1] * 0.4) - actions[agent][1], 0) * REWARD_SLOW
                     
-                    if agent in self.uav_collision_penalty:
-                        self.uav_collision_penalty.remove(agent)
+                    if self.uav_collision_penalty[agent] > 0:
+                        self.uav_collision_penalty[agent] = self.uav_collision_penalty[agent] - 1
                         continue
                     
                     uav_moving_result = self.uav_move(agent, actions[agent])
@@ -1015,7 +1015,7 @@ class DeliveryEnvironmentWithObstacle(ParallelEnv):
                         rewards[agent] += REWARD_UAV_ARRIVAL
                     elif uav_moving_result == -1:
                         rewards[agent] += REWARD_UAV_VIOLATE
-                        self.uav_collision_penalty.append(agent)
+                        self.uav_collision_penalty[agent] = self.uav_collision_penalty[agent] + 10
                         # self.uav_position[uav_no] = positions_before[uav_no]
                         self.infos['collisions_with_obstacle'] += 1
                     elif uav_moving_result == -2:
@@ -1024,7 +1024,7 @@ class DeliveryEnvironmentWithObstacle(ParallelEnv):
                         # self.dead_agent_list.append(agent)
                         # self.infos.pop(agent)
                         rewards[agent] += REWARD_UAV_WRECK
-                        self.uav_collision_penalty.append(agent)
+                        self.uav_collision_penalty[agent] = self.uav_collision_penalty[agent] + 10
                         # self.uav_position[uav_no] = positions_before[uav_no]
                         self.infos['collisions_with_obstacle'] += 1
                     elif uav_moving_result == 0:
@@ -1060,11 +1060,13 @@ class DeliveryEnvironmentWithObstacle(ParallelEnv):
         for traj_l, traj_r in combinations(self.uav_positions_transfer, 2):
             if not self.uav_safe_distance_detection(traj_l, traj_r, 10):
                 self.infos['collisions_with_uav'] += 2
-                self.uav_collision_penalty.append(traj_l[-1])
-                self.uav_collision_penalty.append(traj_r[-1])
+                self.uav_collision_penalty[traj_l[-1]] = self.uav_collision_penalty[traj_l[-1]] + 10
+                self.uav_collision_penalty[traj_r[-1]] = self.uav_collision_penalty[traj_r[-1]] + 10
                 # rewards[traj_l[-1]] += REWARD_UAV_WRECK
                 # rewards[traj_r[-1]] += REWARD_UAV_WRECK
         
+        # if self.uav_collision_penalty:
+        #     print(self.uav_collision_penalty)
         # print(self.uav_positions_transfer)
         # Check termination conditions
         ####

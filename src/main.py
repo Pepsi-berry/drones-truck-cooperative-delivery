@@ -416,7 +416,6 @@ class upper_solver():
         else:
             # greedy research when no feasible sorties
             return {}
-
         
     
     def build_CTDRSP(self):

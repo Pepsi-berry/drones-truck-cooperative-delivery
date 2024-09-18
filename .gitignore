@@ -40,8 +40,23 @@ logs/
 *.sqlite
 # *.csv
 
+### VisualStudioCode ###
+.vscode/
+.vscode/*
+# Maybe .vscode/**/* instead - see comments
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+
+### VisualStudioCode Patch ###
+# Ignore all local history of files
+**/.history
+
 # OS generated files #
 ######################
+.vscode*
+**/.DS_Store
 .DS_Store
 .DS_Store?
 ._*

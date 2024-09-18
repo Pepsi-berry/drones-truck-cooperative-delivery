@@ -28,7 +28,7 @@
 checkpoint*
 SAC_best*
 SAC_shortest*
-MFSTSP*
+# MFSTSP*
 data*
 archive*
 
@@ -38,7 +38,7 @@ logs/
 *.log
 *.sql
 *.sqlite
-*.csv
+# *.csv
 
 # OS generated files #
 ######################

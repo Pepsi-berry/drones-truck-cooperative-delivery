@@ -1,5 +1,6 @@
 import os
 import functools
+import random
 from copy import copy
 from re import match, findall
 # from itertools import combinations
@@ -86,7 +87,7 @@ class MultiUAVsTrainingEnvironmentWithObstacle(ParallelEnv):
         self.curriculum_reservation = -1
         self.curriculum = None
         self.dist_threshold = 20
-        self.generative_range = 750 #  + int(self.RNG.integers(1, 4) / 4) * 1000
+        self.generative_range = 1000 #  + int(self.RNG.integers(1, 4) / 4) * 1000
         
         # uav parameters
         # unit here is m/s
@@ -422,8 +423,32 @@ class MultiUAVsTrainingEnvironmentWithObstacle(ParallelEnv):
             uav += offset
         # print("*uav positions*", self.uav_target_positions, self.uav_position)
         
+        # self.no_fly_zones = np.array([self.generate_no_fly_zone() for _ in range(self.num_no_fly_zone)])
+        # self.uav_obstacles = [self.generate_uav_obstacle(grid_num) for _ in range(self.num_uav_obstacle)]
+        
         self.no_fly_zones = np.array([self.generate_no_fly_zone() for _ in range(self.num_no_fly_zone)])
-        self.uav_obstacles = [self.generate_uav_obstacle(grid_num) for _ in range(self.num_uav_obstacle)]
+        self.uav_obstacles = [self.generate_uav_obstacle(grid_num) for _ in range(max(self.num_uav_obstacle - self.num_uavs, 0))]
+
+        for i in range(self.num_uavs):
+            offset = self.uav_position[i] - self.uav_target_positions[i]
+            upper_left_corner = np.array(generate_random_upper_left_corner(self.uav_position[i], self.uav_target_positions[i]))
+            range_size = np.array([random.randint(int(abs(offset[0]) / 10), int(abs(offset[0]) / 8)), random.randint(int(abs(offset[0]) / 10), int(abs(offset[0]) / 8))])
+            lower_right_corner = upper_left_corner + range_size
+            
+            not_suitable = False
+            for customer in self.customer_position_uav:
+                if customer[0] > upper_left_corner[0] and customer[0] < lower_right_corner[0] and customer[1] > upper_left_corner[1] and customer[1] < lower_right_corner[1]:
+                    not_suitable = True
+            for uav in self.uav_position:
+                if uav[0] > upper_left_corner[0] and uav[0] < lower_right_corner[0] and uav[1] > upper_left_corner[1] and uav[1] < lower_right_corner[1]:
+                    not_suitable = True
+            if not not_suitable:
+                self.uav_obstacles.append(
+                    np.array([
+                        upper_left_corner, 
+                        range_size, 
+                    ])
+                )
         
         coordi = {
             agent: np.concatenate(
@@ -948,3 +973,18 @@ def get_image(path):
 
 def cross_product_2d_array(v1, v2):
     return v1[0] * v2[1] - v2[0] * v1[1]
+
+
+def generate_random_upper_left_corner(p1, p2):
+    xlo, xhi, ylo, yhi = (
+        min(p1[0], p2[0]), 
+        max(p1[0], p2[0]), 
+        min(p1[1], p2[1]), 
+        max(p1[1], p2[1])
+    )
+    
+    offset_x = xhi - xlo
+    offset_y = yhi - ylo
+    
+    return [int(xlo + (random.randrange(5, 45) / 100) * offset_x), 
+            int(ylo + (random.randrange(5, 45) / 100) * offset_y)]

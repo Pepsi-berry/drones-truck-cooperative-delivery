@@ -187,7 +187,7 @@ def solve_JOCR_U(nodes, locations, uav_range, uav_velocity, truck_velocity, SIZE
             route_ws_rearrange[i, (i + 1) % num_clusters] = 1
         
         model = gp.Model("JOCR_U")
-        model.setParam('OutputFlag', 0) # eliminate the gurobi logs output to console
+        # model.setParam('OutputFlag', 0) # eliminate the gurobi logs output to console
 
         # add variables
         # focal point coordinations, x axis and y axis(a, b)

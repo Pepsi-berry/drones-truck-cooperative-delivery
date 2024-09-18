@@ -891,7 +891,7 @@ class DeliveryEnvironmentWithObstacle(ParallelEnv):
     # Convert the normalized action back to the range of the original action distribution
     def denormalize_action(self, actions):
         for agent in actions:
-            if match("uav", agent):
+            if match("uav", agent) and actions[agent] is not None:
                 # print(agent, actions[agent])
                 actions[agent][0] = actions[agent][0] * np.pi + np.pi
                 actions[agent][1] = actions[agent][1] * (self.uav_velocity[1]) / 2 + (self.uav_velocity[1]) / 2
@@ -1015,7 +1015,8 @@ class DeliveryEnvironmentWithObstacle(ParallelEnv):
                         rewards[agent] += REWARD_UAV_ARRIVAL
                     elif uav_moving_result == -1:
                         rewards[agent] += REWARD_UAV_VIOLATE
-                        self.uav_collision_penalty[agent] = self.uav_collision_penalty[agent] + 10
+                        num_penalty_step = self.RNG.choice([5, 8])
+                        self.uav_collision_penalty[agent] = self.uav_collision_penalty[agent] + num_penalty_step
                         # self.uav_position[uav_no] = positions_before[uav_no]
                         self.infos['collisions_with_obstacle'] += 1
                     elif uav_moving_result == -2:
@@ -1024,7 +1025,9 @@ class DeliveryEnvironmentWithObstacle(ParallelEnv):
                         # self.dead_agent_list.append(agent)
                         # self.infos.pop(agent)
                         rewards[agent] += REWARD_UAV_WRECK
-                        self.uav_collision_penalty[agent] = self.uav_collision_penalty[agent] + 10
+                        num_penalty_step = self.RNG.choice([5, 8])
+                        # print(num_penalty_step)
+                        self.uav_collision_penalty[agent] = self.uav_collision_penalty[agent] + num_penalty_step
                         # self.uav_position[uav_no] = positions_before[uav_no]
                         self.infos['collisions_with_obstacle'] += 1
                     elif uav_moving_result == 0:
@@ -1060,8 +1063,9 @@ class DeliveryEnvironmentWithObstacle(ParallelEnv):
         for traj_l, traj_r in combinations(self.uav_positions_transfer, 2):
             if not self.uav_safe_distance_detection(traj_l, traj_r, 10):
                 self.infos['collisions_with_uav'] += 2
-                self.uav_collision_penalty[traj_l[-1]] = self.uav_collision_penalty[traj_l[-1]] + 10
-                self.uav_collision_penalty[traj_r[-1]] = self.uav_collision_penalty[traj_r[-1]] + 10
+                num_penalty_step = self.RNG.choice([5, 8])
+                self.uav_collision_penalty[traj_l[-1]] = self.uav_collision_penalty[traj_l[-1]] + num_penalty_step
+                self.uav_collision_penalty[traj_r[-1]] = self.uav_collision_penalty[traj_r[-1]] + num_penalty_step
                 # rewards[traj_l[-1]] += REWARD_UAV_WRECK
                 # rewards[traj_r[-1]] += REWARD_UAV_WRECK
         

@@ -24,11 +24,13 @@
 *.zip
 *.lp
 *.ilp
+*.axv
 checkpoint*
 SAC_best*
 SAC_shortest*
 MFSTSP*
 data*
+archive*
 
 # Logs and databases #
 ######################

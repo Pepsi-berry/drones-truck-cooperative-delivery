@@ -168,9 +168,9 @@ if __name__ == "__main__":
         # print("worker: ", worker)
         # print("episode: ", episode)
         if agent_id.startswith("uav_0"):
-            return "masac_policy_uav_0"
+            return "masac_policy"
         elif agent_id.startswith("uav_1"):
-            return "masac_policy_uav_1"
+            return "masac_policy"
         else:
             raise ValueError("Unknown agent type: ", agent_id)
     
@@ -195,11 +195,11 @@ if __name__ == "__main__":
             #     "max_seq_len": 32, 
             #     },
             policy_model_config = {
-                "custom_model": CustomRNNSACPolicyModel,  # Use this to define custom Q-model(s).
+                "custom_model": CustomSACPolicyModel,  # Use this to define custom Q-model(s).
                 "max_seq_len": 32, 
             },
             q_model_config = {
-                "custom_model": CustomRNNSACQModel,  # Use this to define custom Q-model(s).
+                "custom_model": CustomSACQModel,  # Use this to define custom Q-model(s).
                 "max_seq_len": 32, 
             },
             gamma=0.99, 
@@ -223,18 +223,18 @@ if __name__ == "__main__":
         # .rl_module()
         .multi_agent(
             policies={
-                "masac_policy_uav_0": PolicySpec(
+                "masac_policy": PolicySpec(
                 policy_class=None,  # infer automatically from Algorithm
                 observation_space=None,  # infer automatically from env
                 action_space=None,  # infer automatically from env
                 config={},  # use main config plus <- this override here
                 ),
-                "masac_policy_uav_1": PolicySpec(
-                policy_class=None,  # infer automatically from Algorithm
-                observation_space=None,  # infer automatically from env
-                action_space=None,  # infer automatically from env
-                config={},  # use main config plus <- this override here
-                ),
+                # "masac_policy_uav_1": PolicySpec(
+                # policy_class=None,  # infer automatically from Algorithm
+                # observation_space=None,  # infer automatically from env
+                # action_space=None,  # infer automatically from env
+                # config={},  # use main config plus <- this override here
+                # ),
             },
             policy_mapping_fn=policy_mapping_fn
         )
@@ -249,8 +249,8 @@ if __name__ == "__main__":
     
     # mappo_agent = PPO(config=config, env='ma_training_env')
     # mappo_agent.restore('training/models/checkpoint_000155')
-    # mappo_agent = SAC(config=config, env='ma_training_env')
-    # mappo_agent.restore('training/models/SAC_best_checkpoint_000124')
+    mappo_agent = SAC(config=config, env='ma_training_env')
+    mappo_agent.restore('training/models/SAC_best_checkpoint_12_1000_137')
     # algo_mappo = Algorithm.from_checkpoint('training/models/checkpoint_000155')
     # print("Model Info", algo_mappo.get_policy('mappo_policy').model)
     
@@ -259,47 +259,47 @@ if __name__ == "__main__":
     # if not os.path.exists(ckpt_path):
     #     ckpt_path = None
     
-    analysis = tune.run(
-        "SAC", 
-        config=config, 
-        stop={
-            "training_iteration": 50, 
-            # "timesteps_total": 1_000_000, 
-        }, 
-        # storage_path="./training/logs", 
-        checkpoint_config={
-            'checkpoint_at_end': True, 
-            'checkpoint_frequency': 50, 
-        }
-    )
+    # analysis = tune.run(
+    #     "SAC", 
+    #     config=config, 
+    #     stop={
+    #         "training_iteration": 50, 
+    #         # "timesteps_total": 1_000_000, 
+    #     }, 
+    #     # storage_path="./training/logs", 
+    #     checkpoint_config={
+    #         'checkpoint_at_end': True, 
+    #         'checkpoint_frequency': 50, 
+    #     }
+    # )
         
-    # env = MultiUAVsTrainingEnvironmentWithObstacle(step_len=2, 
-    #                                                render_mode='human', 
-    #                                                num_uavs=8, 
-    #                                                num_uavs_0=4, 
-    #                                                num_uavs_1=4, 
-    #                                                num_uav_obstacle=4, 
-    #                                                num_no_fly_zone=2)
+    env = MultiUAVsTrainingEnvironmentWithObstacle(step_len=2, 
+                                                   render_mode='human', 
+                                                   num_uavs=8, 
+                                                   num_uavs_0=4, 
+                                                   num_uavs_1=4, 
+                                                   num_uav_obstacle=10, 
+                                                   num_no_fly_zone=2)
     
-    # obs, _ = env.reset()
+    obs, _ = env.reset()
     
-    # env.render()
-    # for i in range(1_500):
-    #     actions = {}
-    #     for agent_id, ob in obs.items():
-    #         action = mappo_agent.compute_single_action(
-    #             observation=ob, 
-    #             policy_id='mappo_policy'
-    #         )
-    #         actions[agent_id] = action
-    #     obs, reward, termination, truncation, info = env.step(actions)
+    env.render()
+    for i in range(1_500):
+        actions = {}
+        for agent_id, ob in obs.items():
+            action = mappo_agent.compute_single_action(
+                observation=ob, 
+                policy_id='masac_policy'
+            )
+            actions[agent_id] = action
+        obs, reward, termination, truncation, info = env.step(actions)
         
-    #     if i % 5 == 0:
-    #         env.render()
-    #     if not env.agents:
-    #         break
+        if i % 5 == 0:
+            env.render()
+        if not env.agents:
+            break
             
-    # env.close()
+    env.close()
     
     ray.shutdown()
     

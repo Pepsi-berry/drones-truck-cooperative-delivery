@@ -11,8 +11,6 @@ from ray.tune import register_env
 from ray.rllib.env import ParallelPettingZooEnv
 from ray.rllib.policy.policy import PolicySpec
 
-# from tsp_solver import solve_tsp
-# from customer_clustering_solver import solve_drones_truck_with_parking
 from train import env_creator
 from base import CustomSACPolicyModel, CustomSACQModel
 from CTDRSP_FL.assignment_routing_SA import assignment_routing_SA
@@ -946,9 +944,10 @@ def run_hierarchical_exp(env, model, seed, max_iter=3_000, heuristic=True, rende
             agent: model.compute_single_action(
                 observation=observations[agent], 
                 policy_id='masac_policy', 
-                explore=False, 
-            )
-            for agent in env.agents if match("uav", agent) #  and not infos[agent]
+                explore=True, 
+            ) if match("uav", agent) and not infos['is_ready'][agent]
+            else None
+            for agent in env.agents
         }
         observations, _, _, _, infos = env.step(actions)
         
@@ -1002,13 +1001,13 @@ if __name__ == "__main__":
         # [20, 4, 2], 
         # [20, 6, 4], 
         # [30, 4, 2], 
-        [30, 6, 4], 
+        # [30, 6, 4], 
         # [30, 8, 4], 
         # [40, 6, 4], 
         # [40, 8, 4], 
         
         # [40, 10, 4]
-        # [50, 8, 4]
+        [50, 8, 4]
     ]
     uav_params_set = [
         # [1, 1], 
@@ -1024,6 +1023,7 @@ if __name__ == "__main__":
         # [10, 0], 
         [15, 0], 
         # [20, 0], 
+        # [30, 0]
     ]
     
     # env = env_creator({
@@ -1063,10 +1063,10 @@ if __name__ == "__main__":
     # column_params = ['map_size', 'grid_size', 'truck_velocity']
     # column_uav_params = ['uav_no', 'velocity', 'range', 'capacity']
     
-    num_experiments = 1
+    num_experiments = 2
     seed_range = 20_021_122
     seed_seq = np.random.randint(1, seed_range, size=num_experiments)
-    # seed_seq = np.array([11731560, 13419484, 12728681, 5704009, 12273699, 15953703, 11638895, 15495818, 12642298, 9794760, 5602884, 1466239, 18912928, 619598, 14402845, 7916253, 17711732, 8950223, 18710155, 19048116, 13232347, 3232871, 14078335, 13817685, 985938])
+    # seed_seq = np.array([13999469, 19117019, 9705952, 13663483, 14602335, 6217932, 5727243, 15479320, 12812701, 3989789, 1241067])
     print(seed_seq.tolist())
     
     for num_parcels, num_parcels_truck, num_parcels_uav in customer_params_set:
@@ -1241,7 +1241,7 @@ if __name__ == "__main__":
                     num_parcels_uav=num_parcels_uav, 
                     num_uav_obstacle=num_uav_obstacle, 
                     num_no_fly_zone=num_no_fly_zone, 
-                    render_mode=None
+                    render_mode='human'
                 )
     
                 for exp_no in range(num_experiments):

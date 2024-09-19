@@ -893,8 +893,9 @@ class DeliveryEnvironmentWithObstacle(ParallelEnv):
         for agent in actions:
             if match("uav", agent) and actions[agent] is not None:
                 # print(agent, actions[agent])
+                uav_type = self.get_uav_info(agent)[0]
                 actions[agent][0] = actions[agent][0] * np.pi + np.pi
-                actions[agent][1] = actions[agent][1] * (self.uav_velocity[1]) / 2 + (self.uav_velocity[1]) / 2
+                actions[agent][1] = actions[agent][1] * (self.uav_velocity[uav_type]) / 2 + (self.uav_velocity[uav_type]) / 2
 
 
     def step(self, actions):
@@ -1175,7 +1176,7 @@ class DeliveryEnvironmentWithObstacle(ParallelEnv):
         customer_both_image = pygame.transform.scale(customer_both_image, (grid_width * 0.8, grid_height * 0.8))
         customer_truck_image = get_image(os.path.join("img", "CustomerTruck.png"))
         customer_truck_image = pygame.transform.scale(customer_truck_image, (grid_width * 0.8, grid_height * 0.8))
-        customer_uav_image = get_image(os.path.join("img", "CustomerUAV.png"))
+        customer_uav_image = get_image(os.path.join("img", "CustomerBoth.png"))
         customer_uav_image = pygame.transform.scale(customer_uav_image, (grid_width * 0.8, grid_height * 0.8))
         
         self.screen.blit(map_image, (0, 0))

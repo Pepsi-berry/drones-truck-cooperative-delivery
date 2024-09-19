@@ -21,7 +21,29 @@ from JOCR.unrestricted_JOCR_solver import solve_JOCR_U
 from heuristic_upper_solver import MFSTSPUpperSolver
 
 MAX_INT = 100
-        
+
+
+def save_video(
+    frames: list,
+    video_folder: str,
+    seed,
+    num_cust, 
+    name,
+    fps=60,
+):
+    from moviepy.video.io.ImageSequenceClip import ImageSequenceClip
+    from moviepy.video.fx.all import resize
+    # from PIL import Image as im
+    video_folder = os.path.abspath(video_folder)
+    os.makedirs(video_folder, exist_ok=True)
+    video_path = f"{video_folder}/{name}_{seed}_{num_cust}_{fps}fps.mp4"
+    clip = ImageSequenceClip(frames, fps=fps)
+    # making sure even dimensions
+    width = clip.w if (clip.w % 2 == 0) else clip.w - 1
+    height = clip.h if (clip.h % 2 == 0) else clip.h - 1
+    clip = resize(clip, newsize=(width, height))
+    clip.write_videofile(video_path)
+
 
 def reshape_tsp_route(route):
     if 0 not in route:
@@ -411,11 +433,11 @@ class upper_solver():
                     actions[name_uav_1] = task_uav_1_queue[min_index_uav_1] - self.num_truck_customer - 1
                     return actions
                     
-        if len(uav_1_avail_queue) > max(self.num_uavs / 4, 2):
-            return self.solve_greedy(global_obs, agent_infos, uav_range * 0.4)
-        else:
-            # greedy research when no feasible sorties
-            return {}
+        # if len(uav_1_avail_queue) > max(self.num_uavs / 4, 2):
+        return self.solve_greedy(global_obs, agent_infos, uav_range * 0.8)
+        # else:
+        #     # greedy research when no feasible sorties
+        #     return {}
         
     
     def build_CTDRSP(self):
@@ -449,10 +471,10 @@ class upper_solver():
         nodes, locations, distances_truck, distances_uav = self.build_CTDRSP()
         # print(nodes, locations)
         S_hat = int(self.num_customer * 0.5)
-        T_max = 660
+        T_max = 700
         T_min = 1e-2
         K = 0.94
-        iter_max = 22
+        iter_max = 25
         
         iter_max_inner = 30
         iter_max_outer = 15
@@ -660,8 +682,8 @@ def heuristic_lower_policy(obs, agent):
     return np.array([norm_angle, v])
 
 
-def run_JOCR_exp(env, seed, max_iter=3_000, render=None, video_record=False):
-    # video_frame = []
+def run_JOCR_exp(env, seed, max_iter=4_000, render=None, video_record=False):
+    video_frame = []
     observations, infos = env.reset(seed=seed)
     num_collisions = [0, 0]
     infos = infos['is_ready']
@@ -720,23 +742,22 @@ def run_JOCR_exp(env, seed, max_iter=3_000, render=None, video_record=False):
         infos = infos['is_ready']
         
         if not env.agents:
-            print("parking finish in : ", i)
-            # if video_record:
-            #     video_name = save_video(video_frame, "parking_video_2", 30, 'delivery_env', fps=30)
-            #     last_frame_location = save_last_frame(video_frame[-1], "last_frame", i, 'delivery_env')
-            #     print('video_name: ', video_name)
-            #     print('last_frame_location: ', last_frame_location)
+            if video_record:
+                video_name = save_video(video_frame, "delivery_vid", seed, num_parcels, 'JOCR_video', fps=30)
+                print('video_name: ', video_name)
+            else: 
+                print("finish in : ", i)
             return i, num_collisions, np.concatenate(([solver.warehouse_pos], solver.customer_pos_truck)), focal_route, clusters_copy
         if render and (i % 5 == 0):
             env.render()
-        # elif video_record:
-        #     video_frame.append(env.render())
+        elif video_record:
+            video_frame.append(env.render())
             
     return 0, [0, 0], solver.customer_pos_truck, focal_route, clusters_copy
 
 
 def run_MFSTSP_exp(env, seed, max_iter=3_000, render=None, video_record=False):
-    # video_frame = []
+    video_frame = []
     observations, infos = env.reset(seed=seed, options=2)
     num_collisions = [0, 0]
     infos = infos['is_ready']
@@ -797,23 +818,22 @@ def run_MFSTSP_exp(env, seed, max_iter=3_000, render=None, video_record=False):
         infos = infos['is_ready']
         
         if not env.agents:
-            print("parking finish in : ", i)
-            # if video_record:
-            #     video_name = save_video(video_frame, "parking_video_2", 30, 'delivery_env', fps=30)
-            #     last_frame_location = save_last_frame(video_frame[-1], "last_frame", i, 'delivery_env')
-            #     print('video_name: ', video_name)
-            #     print('last_frame_location: ', last_frame_location)
+            if video_record:
+                video_name = save_video(video_frame, "delivery_vid", seed, num_parcels, 'MFSTSP_video', fps=30)
+                print('video_name: ', video_name)
+            else:
+                print("finish in : ", i)
             return i, num_collisions, np.concatenate(([solver.warehouse_pos], solver.customer_pos_truck)), route, assign_dict_copy
         if render and (i % 5 == 0):
             env.render()
-        # elif video_record:
-        #     video_frame.append(env.render())
+        elif video_record:
+            video_frame.append(env.render())
             
     return 0, [0, 0], np.concatenate(([solver.warehouse_pos], solver.customer_pos_truck)), route, assign_dict_copy
 
 
-def run_CTDRSP_exp(env, seed, max_iter=3_000, render=None, video_record=False):
-    # video_frame = []
+def run_CTDRSP_exp(env, seed, max_iter=4_000, render=None, video_record=False):
+    video_frame = []
     observations, infos = env.reset(seed=seed, options=2)
     num_collisions = [0, 0]
     infos = infos['is_ready']
@@ -867,22 +887,22 @@ def run_CTDRSP_exp(env, seed, max_iter=3_000, render=None, video_record=False):
         infos = infos['is_ready']
         
         if not env.agents:
-            print("parking finish in : ", i)
-            # if video_record:
-            #     video_name = save_video(video_frame, "parking_video_2", 30, 'delivery_env', fps=30)
-            #     last_frame_location = save_last_frame(video_frame[-1], "last_frame", i, 'delivery_env')
-            #     print('video_name: ', video_name)
-            #     print('last_frame_location: ', last_frame_location)
+            if video_record:
+                video_name = save_video(video_frame, "delivery_vid", seed, num_parcels, 'CTDRSP_video', fps=30)
+                print('video_name: ', video_name)
+            else:
+                print("finish in : ", i)
             return i, num_collisions, np.concatenate(([solver.warehouse_pos], solver.customer_pos_truck)), route, assign_dict_copy
         if render and (i % 10 == 0):
             env.render()
-        # elif video_record:
-        #     video_frame.append(env.render())
+        elif video_record:
+            video_frame.append(env.render())
             
     return 0, [0, 0], np.concatenate(([solver.warehouse_pos], solver.customer_pos_truck)), route, assign_dict_copy
 
 
 def run_hierarchical_exp(env, model, seed, max_iter=3_000, heuristic=True, render=None, video_record=False):
+    video_frame = []
     num_collisions = [0, 0]
 
     observations, infos = env.reset(seed=seed, options=1)
@@ -943,7 +963,7 @@ def run_hierarchical_exp(env, model, seed, max_iter=3_000, heuristic=True, rende
             agent: model.compute_single_action(
                 observation=observations[agent], 
                 policy_id='masac_policy', 
-                explore=True, 
+                explore=False, 
             ) if match("uav", agent) and not infos['is_ready'][agent]
             else None
             for agent in env.agents
@@ -954,12 +974,18 @@ def run_hierarchical_exp(env, model, seed, max_iter=3_000, heuristic=True, rende
         num_collisions[1] += infos['collisions_with_uav']
         
         if not env.agents:
-            print("finish in : ", i)
+            if video_record:
+                video_name = save_video(video_frame, "delivery_vid", seed, num_parcels, 'OURs_video', fps=30)
+                print('video_name: ', video_name)
+            else:
+                print("finish in : ", i)
             # print("conflict with obstacle ", num_collisions[0], " times.")
             # print("conflict with uav ", num_collisions[1], " times.")
             return i, num_collisions, np.concatenate(([delivery_upper_solver.warehouse_pos], delivery_upper_solver.customer_pos_truck)), truck_route_copy
         if render and i % 8 == 0:
             env.render()
+        elif video_record:
+            video_frame.append(env.render())
     # print("conflict with obstacle ", num_collisions[0], " times.")
     # print("conflict with uav ", num_collisions[1], " times.")
     
@@ -997,16 +1023,16 @@ if __name__ == "__main__":
     
     customer_params_set = [
         # [10, 2, 2], 
-        # [20, 4, 2], 
+        [20, 4, 2], 
         # [20, 6, 4], 
         # [30, 4, 2], 
-        # [30, 6, 4], 
+        [30, 6, 4], 
         # [30, 8, 4], 
         # [40, 6, 4], 
         # [40, 8, 4], 
         
         # [40, 10, 4]
-        [50, 8, 4]
+        # [50, 8, 4]
     ]
     uav_params_set = [
         # [1, 1], 
@@ -1065,8 +1091,10 @@ if __name__ == "__main__":
     num_experiments = 2
     seed_range = 20_021_122
     seed_seq = np.random.randint(1, seed_range, size=num_experiments)
-    # seed_seq = np.array([13999469, 19117019, 9705952, 13663483, 14602335, 6217932, 5727243, 15479320, 12812701, 3989789, 1241067])
+    # seed_seq = np.array([12559438, 13999469, 19117019, 9705952, 13663483, 14602335, 6217932, 5727243, 15479320, 12812701, 3989789, 1241067])
     print(seed_seq.tolist())
+    
+    env_mode = 'rgb_array'
     
     for num_parcels, num_parcels_truck, num_parcels_uav in customer_params_set:
         num_customer_both = num_parcels - num_parcels_truck - num_parcels_uav
@@ -1089,9 +1117,14 @@ if __name__ == "__main__":
                     num_parcels_uav=num_parcels_uav, 
                     num_uav_obstacle=num_uav_obstacle, 
                     num_no_fly_zone=num_no_fly_zone, 
-                    render_mode=None
+                    render_mode=env_mode
                 )
-    
+                
+                if env.render_mode == "rgb_array":
+                    video_record = True
+                else:
+                    video_record = False
+                
                 for exp_no in range(num_experiments):
                     seed = int(seed_seq[exp_no])
                     # print(seed)
@@ -1100,7 +1133,7 @@ if __name__ == "__main__":
                     # for _ in range(20):
                     # seed = random.randint(1, 20_021_122)
                     #     print(seed)
-                    makespan_CTDRSP, collisions_CTDRSP, locations_CTDRSP, route_CTDRSP, assignments_CTDRSP = run_CTDRSP_exp(env, seed, render=False)
+                    makespan_CTDRSP, collisions_CTDRSP, locations_CTDRSP, route_CTDRSP, assignments_CTDRSP = run_CTDRSP_exp(env, seed, render=False, video_record=video_record)
                     CTDRSP_exp_row = pd.DataFrame([{
                         'exp_name': f"CTDRSP_{exp_no}", 
                         'seed': seed, 
@@ -1124,7 +1157,7 @@ if __name__ == "__main__":
                     # for i in range(20):
                     # seed = random.randint(1, 20_021_122)
                     # print(seed)
-                    makespan_MFSTSP, collisions_MFSTSP, locations_MFSTSP, route_MFSTSP, assignments_MFSTSP = run_MFSTSP_exp(env, seed, render=False)
+                    makespan_MFSTSP, collisions_MFSTSP, locations_MFSTSP, route_MFSTSP, assignments_MFSTSP = run_MFSTSP_exp(env, seed, render=False, video_record=video_record)
                     MFSTSP_exp_row = pd.DataFrame([{
                         'exp_name': f"MFSTSP_{exp_no}", 
                         'seed': seed, 
@@ -1146,7 +1179,7 @@ if __name__ == "__main__":
                     
                     # **JOCR**
                     # seed = random.randint(1, 20_021_122)
-                    makespan_JOCR, collisions_JOCR, locations_JOCR, focal_route, clusters = run_JOCR_exp(env, seed, render=False)
+                    makespan_JOCR, collisions_JOCR, locations_JOCR, focal_route, clusters = run_JOCR_exp(env, seed, render=False, video_record=video_record)
                     JOCR_exp_row = pd.DataFrame([{
                         'exp_name': f"JOCR_{exp_no}", 
                         'seed': seed, 
@@ -1240,14 +1273,19 @@ if __name__ == "__main__":
                     num_parcels_uav=num_parcels_uav, 
                     num_uav_obstacle=num_uav_obstacle, 
                     num_no_fly_zone=num_no_fly_zone, 
-                    render_mode='human'
+                    render_mode=env_mode
                 )
     
+                if env.render_mode == "rgb_array":
+                    video_record = True
+                else:
+                    video_record = False
+                
                 for exp_no in range(num_experiments):
                 # seed = random.randint(1, 20_021_122)
                     seed = int(seed_seq[exp_no])
                     # makespan_OURS, collisions_OURS, locations_OURS = run_hierarchical_exp(env, masac_agent, seed, heuristic=False, render=False)
-                    makespan_OURS, collisions_OURS, locations_OURS, truck_route = run_hierarchical_exp(env, masac_agent, seed, render=False)
+                    makespan_OURS, collisions_OURS, locations_OURS, truck_route = run_hierarchical_exp(env, masac_agent, seed, render=False, video_record=video_record)
                     exp_row = pd.DataFrame([{
                         'exp_name': f"OURS_{exp_no}", 
                         'seed': seed, 

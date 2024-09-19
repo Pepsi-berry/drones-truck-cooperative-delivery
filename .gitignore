@@ -41,6 +41,7 @@ logs/
 # *.csv
 
 ### VisualStudioCode ###
+MFSTSP*
 .vscode/
 .vscode/*
 # Maybe .vscode/**/* instead - see comments

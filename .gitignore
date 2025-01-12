@@ -28,13 +28,16 @@
 checkpoint*
 SAC_best*
 SAC_shortest*
+test*
 # MFSTSP*
 data*
 archive*
+*.pkl
 
 # Logs and databases #
 ######################
 logs/
+log/
 *.log
 *.sql
 *.sqlite

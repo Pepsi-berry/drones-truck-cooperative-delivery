@@ -667,6 +667,151 @@ class CustomRNNSACQModel(TorchModelV2, nn.Module):
         return q_value_out, h_state
     
 
+class Encoder(nn.Module):
+    def __init__(self, embedding_dim,
+                 hidden_dim,
+                 n_layers,
+                 dropout=False):
+        """
+        Initiate Encoder
+
+        :param Tensor embedding_dim: Number of embbeding channels
+        :param int hidden_dim: Number of hidden units for the LSTM
+        :param int n_layers: Number of layers for LSTMs
+        :param float dropout: Float between 0-1
+        :param bool bidir: Bidirectional
+        """
+        nn.Module.__init__(self)
+        super(Encoder, self).__init__()
+        self.hidden_dim = hidden_dim
+        self.n_layers = n_layers
+        self.gru = nn.GRU(embedding_dim,
+                            self.hidden_dim,
+                            n_layers,
+                            batch_first=True, 
+                            dropout=dropout)
+
+        # # Used for propagating .cuda() command
+        # self.h0 = nn.Parameter(th.zeros(1), requires_grad=False)
+        
+        
+    def forward(self, embedded_inputs, state=None):
+        # embedded_inputs = embedded_inputs.permute(1, 0, 2)
+
+        outputs, state = self.gru(embedded_inputs)
+
+        return outputs, state
+    
+    
+    def init_hidden(self):
+        """
+        Initiate hidden units
+
+        :param Tensor embedded_inputs: The embedded input of Pointer-NEt
+        :return: Initiated hidden units for the GRUs
+        """
+
+        # batch_size = embedded_inputs.size(0)
+
+        # Reshaping (Expanding)
+        h0 = self.h0.unsqueeze(0).unsqueeze(0).repeat(self.n_layers,
+                                                      self.hidden_dim)
+
+        return h0
+    
+    
+class Attention(nn.Module):
+    def __init__(self, input_dim, hidden_dim):
+        super().__init__()
+        self.input_dim = input_dim
+        self.hidden_dim = hidden_dim
+
+        self.W1 = nn.Linear(hidden_dim, hidden_dim, bias=False)
+        self.W2 = nn.Linear(hidden_dim, hidden_dim, bias=False)
+        self.vt = nn.Linear(hidden_dim, 1, bias=False)
+        self.tanh = nn.Tanh()
+        self.softmax = nn.Softmax()
+        
+    
+    def forward(self, context, decoded):
+        # context: output of encoder
+        # decoded: hidden state of decoder
+		# (batch_size, seq_len, hidden_size)
+        encoder_transform = self.W1(context)
+
+		# (batch_size, hidden_size) => (batch_size, 1, hidden_size)
+        decoder_transform = self.W2(decoded).unsqueeze(1)
+
+		# (batch_size, seq_len, 1) => (batch_size, seq_len)
+        u_i = self.vt(self.tanh(encoder_transform + decoder_transform)).squeeze(-1)
+        log_score = self.softmax(u_i)
+        
+        return log_score
+        
+
+class Decoder(nn.Module):
+    def __init__(self, embedding_dim, hidden_dim):
+        super().__init__()
+        self.embedding_dim = embedding_dim
+        self.hidden_dim = hidden_dim
+        
+        # self.gru_cell = nn.GRUCell(input_size=hidden_dim, hidden_size=hidden_dim)
+        self.gru = nn.GRU(input_size=hidden_dim, hidden_size=hidden_dim, num_layers=1, batch_first=True)
+        self.attention = Attention(hidden_dim, hidden_dim)
+
+        # self.hidden_state = None
+        # # Used for propagating .cuda() command
+        # self.mask = nn.Parameter(th.ones(1), requires_grad=False)
+        # self.runner = nn.Parameter(th.zeros(1), requires_grad=False)
+    
+    def forward(self, 
+                embedded_inputs, 
+                decoder_input, # zeros tensor
+                hidden, # hidden state of encoder
+                context): # output of encoder
+        # (hidden_size, )
+        _, hidden_state = self.gru(decoder_input, hidden)
+        log_score = self.attention(context, hidden_state)
+        
+        return log_score
+
+
+class PointerNet(TorchModelV2, nn.Module):
+    def __init__(self, obs_space, action_space, num_outputs, model_config, name):
+        super().__init__(obs_space, action_space, num_outputs, model_config, name)
+        self.embedding_dim = 16
+        self.hidden_dim = 64
+        self.num_layers = 1
+        # (batch_size, seq_len, feature_size)
+        self.embedding = nn.Linear(2, self.embedding_dim)
+        # (batch_size, seq_len, embedding_size)
+        self.encoder = Encoder(embedding_dim=self.embedding_dim, 
+                               hidden_dim=self.hidden_dim, 
+                               n_layers=self.num_layers)
+        # (batch_size, seq_len, hidden_size)
+        self.decoder = Decoder(embedding_dim=self.embedding_dim, hidden_dim=self.hidden_dim)
+        # (seq_len)
+        
+    
+    def forward(
+        self, 
+        input_dict, 
+        state, 
+        seq_lens, 
+    ):
+        input_data = input_dict['obs']
+        batch_size = input_data.size(0)
+        seq_lens = input_data.size(1)
+        
+        decoder_input = th.zeros(batch_size, self.hidden_dim)
+        
+        embedded = self.embedding(input_data)
+        
+        encoder_output, encoder_hidden = self.encoder(embedded)
+        
+        log_score = self.decoder(embedded, decoder_input, encoder_hidden[-1], encoder_output)
+        pointer = log_score.argmax()
+                
 
 def _remote_fn(env_runner, new_curri: int):
     # We recreate the entire env object by changing the env_config on the worker,

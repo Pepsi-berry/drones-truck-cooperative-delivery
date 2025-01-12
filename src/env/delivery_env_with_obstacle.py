@@ -5,10 +5,8 @@ from re import match, findall
 from itertools import combinations
 
 import numpy as np
-from gymnasium.spaces import Box, Discrete, MultiDiscrete, Dict, MultiBinary
 from gymnasium.utils import seeding
 
-from pettingzoo import ParallelEnv
 import pygame
 
 MODE_NORMAL = 0
@@ -42,7 +40,7 @@ COLOR_OBSTACLE = (254, 195, 106)
 # In once decision, there may be more than one uav selected the same customer as the target point
 # special treatment of this needs to be refined(maybe AEV is more suitable? :(
 
-class DeliveryEnvironmentWithObstacle(ParallelEnv):
+class DeliveryEnvironmentWithObstacle():
     """The metadata holds environment constants.
     
     The "name" metadata allows the environment to be pretty printed.
@@ -137,22 +135,23 @@ class DeliveryEnvironmentWithObstacle(ParallelEnv):
         #                         # "uav_1_2", "uav_1_3", 
         #                         ]
         
+        # mapping uav_no to uav_name
         self.possible_agents = ["truck"] + ["uav_0_" + str(i) for i in range(self.num_uavs_0)] + ["uav_1_" + str(i) for i in range(self.num_uavs_1)]
-        
+        # mapping uav_name to uav_no
         self.uav_name_mapping = dict(zip([agent for agent in self.possible_agents if match("uav", agent)],
                                          list(range(self.num_uavs))))
-        
+        # self.uav_no_mapping = [agent for agent in self.possible_agents if match("uav", agent)]
         # The action space of the truck is, choosing a meaningful target point to go to
         # that is warehouse point or customer points which truck can delivery
         # the action space of the uav is moving in any direction and the moving speed
-        self.action_spaces = {
-            agent: (
-                Discrete(self.num_customer_truck + 1) if match("truck", agent) 
-                else Box(low=-1, high=1, 
-                         shape=(2, ), dtype=np.float32)
-            ) 
-            for agent in self.possible_agents
-        }
+        # self.action_spaces = {
+        #     agent: (
+        #         Discrete(self.num_customer_truck + 1) if match("truck", agent) 
+        #         else Box(low=-1, high=1, 
+        #                  shape=(2, ), dtype=np.float32)
+        #     ) 
+        #     for agent in self.possible_agents
+        # }
         
         ##########################################################################################
         # agent positions, warehouse positions, customer positions, 
@@ -172,6 +171,14 @@ class DeliveryEnvironmentWithObstacle(ParallelEnv):
         # self.uav_target_angle_cos = None
         self.truck_path = None
 
+        # 0 means truck, 1-num_uavs means uav
+        self.current_carrier = None
+        # True means available, False means unavailable
+        self.available_carrier = None
+        
+        self.last_tr = None
+        self.last_dr = None
+
         # The following three *_mask will be assigned as slices of action_mask. 
         # The slicing operation will return the view of the original data, 
         # so that the modification of *_mask will have an impact on the original data.
@@ -180,7 +187,6 @@ class DeliveryEnvironmentWithObstacle(ParallelEnv):
         
         # infos contains information about the state of the agents.
         self.infos = None
-        
         
         ##########################################################################################
         # parameters below The following variables will be assigned in reset(), 
@@ -218,48 +224,6 @@ class DeliveryEnvironmentWithObstacle(ParallelEnv):
         
         self.uav_collision_penalty = None
         
-        # 1(warehouse) + 1(truck itself)
-        ###########################################################################################
-        # 1(uav info: no. and velocity) + 1(dist_uav and dist_obstacle)
-        # 1(moving target(current)) + 1(moving target(destination))
-        # uav_obs_space = np.row_stack([[self.num_uavs, np.max(self.uav_velocity) + 1], 
-        #                               [DIST_RESTRICT_UAV + 1, DIST_RESTRICT_OBSTACLE + 1], 
-        #                               np.full([(1 + 1 + self.num_uavs + self.num_uav_obstacle + self.num_no_fly_zone * 2), 2], 
-        #                                       self.map_size + 1)])
-        self.observation_spaces = {
-            agent: (
-                Dict(
-                    {
-                        "pos_obs": MultiDiscrete(np.full([(1 + 1 + self.num_uavs + self.num_parcels), 2], self.map_size + 1)), 
-                        "truck_action_masks": MultiBinary(self.num_parcels), 
-                        "uav_action_masks" : MultiBinary([2, self.num_customer_uav]) # 2: uav_0 and uav_1
-                    }
-                ) if match("truck", agent)
-                else Dict(
-                    {
-                        # 2 means no-fly zones, obstacles & uavs.
-                        "surroundings": MultiBinary([3, self.uav_obs_range, self.uav_obs_range]), 
-                        # 2 vectors representing uav to target, target to target of target
-                        "vecs": Box(low=-1 * self.map_size, high=self.map_size, shape=[4, ], dtype=np.int32)
-                    }
-                )
-            )
-            for agent in self.possible_agents
-        }
-    
-    # Observation space should be defined here.
-    # lru_cache allows observation and action spaces to be memoized, reducing clock cycles required to get each agent's space.
-    # If your spaces change over time, remove this line (disable caching).
-    @functools.lru_cache(maxsize=None)
-    def observation_space(self, agent):
-        # gymnasium spaces are defined and documented here: https://gymnasium.farama.org/api/spaces/
-        return self.observation_spaces[agent]
-
-    # Action space should be defined here.
-    # If your spaces change over time, remove this line (disable caching).
-    @functools.lru_cache(maxsize=None)
-    def action_space(self, agent):
-        return self.action_spaces[agent]
     
     def get_uav_info(self, uav):
         # get the uav info: kind and no.
@@ -465,6 +429,13 @@ class DeliveryEnvironmentWithObstacle(ParallelEnv):
         self.agents = self.possible_agents.copy()
         self.dead_agent_list = []
         self.uav_stages = np.ones(self.num_uavs) * (-1)
+        # set all carrier status to available for TA
+        self.available_carrier = np.ones(self.num_uavs + 1)
+        available_indices = np.flatnonzero(self.available_carrier)
+        self.current_carrier = available_indices[0] if available_indices.size > 0 else None
+        self.has_available_uav_0 = True
+        self.has_available_uav_1 = True
+
         # The warehouse is located in the center of the map
         self.warehouse_position = np.array([self.map_size / 2, self.map_size / 2], dtype=np.int32)
         # All customer points are distributed at the edge of the road grid
@@ -541,11 +512,12 @@ class DeliveryEnvironmentWithObstacle(ParallelEnv):
         # to warehouse —— to customer_truck —— to customer_both —— to customer_uav —— uav do nothing
         #       1      ——      4 here       ——      10 here     ——      6 here     ——        1
         # thats for convenience of slicing
-        self.action_masks = np.ones(1 + self.num_parcels + 1)
-        self.truck_masks = self.action_masks[: 1 + self.num_customer_truck]
-        self.uav_masks = self.action_masks[1 + self.num_parcels_truck : 1 + self.num_parcels + 1]
-        self.uav0_load_masks = np.ones(1 + self.num_customer_uav)
-        self.uav1_load_masks = np.ones(1 + self.num_customer_uav)
+        self.action_masks = np.ones(1 + self.num_parcels)
+        self.truck_masks = self.action_masks[:]
+        self.truck_masks[0] = 0
+        self.uav_masks = self.action_masks[1 + self.num_parcels_truck : ]
+        self.uav0_load_masks = np.ones(self.num_customer_uav)
+        self.uav1_load_masks = np.ones(self.num_customer_uav)
 
         for i in range(self.num_customer_uav):
             if self.parcels_weight[i] > self.uav_capacity[0]:
@@ -553,8 +525,8 @@ class DeliveryEnvironmentWithObstacle(ParallelEnv):
             if self.parcels_weight[i] > self.uav_capacity[1]:
                 self.uav1_load_masks[i] = 0
         
-        uav_0_masks = self.uav0_load_masks * self.uav_masks
-        uav_1_masks = self.uav1_load_masks * self.uav_masks
+        self.last_tr = 0
+        self.last_dr = 0
 
         # current_action_masks = {
         #     agent: (self.truck_masks if match("truck", agent)
@@ -564,14 +536,16 @@ class DeliveryEnvironmentWithObstacle(ParallelEnv):
         #     for agent in self.possible_agents
         # }
         
+        obs = np.concatenate([self.warehouse_position[np.newaxis, :], self.customer_position_truck, self.customer_position_both, self.customer_position_uav]) - self.truck_position
+        upper_observation = {
+            "obs": obs, "mask": self.action_masks, 'last': 0, 
+            "pos_obs" : np.row_stack([[self.warehouse_position, self.truck_position], self.uav_position, 
+                                self.customer_position_truck, self.customer_position_both, self.customer_position_uav]), 
+        }
+
         observations = {
             agent: 
-                    dict({
-                        "pos_obs" : np.row_stack([[self.warehouse_position, self.truck_position], self.uav_position, 
-                                           self.customer_position_truck, self.customer_position_both, self.customer_position_uav]), 
-                        "truck_action_masks" : self.action_masks[1 : -1], 
-                        "uav_action_masks" : np.row_stack([uav_0_masks[ : -1], uav_1_masks[ : -1]])
-                    }) if match("truck", agent)
+                    upper_observation if match("truck", agent)
                     # else np.row_stack([self.truck_position, self.truck_position, 
                     #                    np.array([[self.get_uav_info(agent)[2], self.uav_velocity[self.get_uav_info(agent)[0]]], 
                     #                              [DIST_RESTRICT_UAV, DIST_RESTRICT_OBSTACLE]]), 
@@ -602,7 +576,8 @@ class DeliveryEnvironmentWithObstacle(ParallelEnv):
                 for a in self.possible_agents
             }, 
             'collisions_with_obstacle': 0, 
-            'collisions_with_uav': 0
+            'collisions_with_uav': 0, 
+            'make_delivery': 0, 
         }
 
         return observations, self.infos
@@ -632,7 +607,7 @@ class DeliveryEnvironmentWithObstacle(ParallelEnv):
                             self.truck_target_position = copy(self.customer_position_both[action - self.num_parcels_truck - 1])
                             # self.truck_masks[action] = 0
                     elif self.num_customer_truck < action <= self.num_parcels:
-                        if self.action_masks[action] == 0:
+                        if self.truck_masks[action] == 0:
                             self.infos['is_ready'][agent] = True
                         else:
                             self.truck_target_position = copy(self.customer_position_uav[action - self.num_customer_truck - 1])
@@ -681,6 +656,76 @@ class DeliveryEnvironmentWithObstacle(ParallelEnv):
                             self.retrieve_target_positions[uav_no] = copy(self.customer_position_uav[action[1] - self.num_customer_truck - 1])
                         else:
                             self.retrieve_target_positions[uav_no] = copy(self.flexible_locations[action[1] - self.num_parcels - 1])
+    
+    
+    # assign tasks to agents, and then update the related information: the target position, the action mask, the status of the agent, the last action, etc, 
+    # and then get the next available agent
+    def upper_step(self, TA_action): # TA_action(int, (0, num_parcels + 1))
+        if self.current_carrier is not None: # typically must not None
+            # truck-case
+            if self.current_carrier == 0:
+                if isinstance(TA_action, np.int64) or isinstance(TA_action, np.int32) or isinstance(TA_action, int):
+                    self.available_carrier[0] = 0
+                    self.current_carrier = None
+                    self.infos['is_ready']['truck'] = False
+                    self.last_tr = np.int64(TA_action)
+                    
+                    if TA_action == 0:
+                        cust = copy(self.warehouse_position)
+                    elif 0 < TA_action <= self.num_parcels_truck:
+                        cust = self.customer_position_truck[TA_action - 1]
+                        self.truck_masks[TA_action] = 0
+                    elif self.num_parcels_truck < TA_action <= self.num_customer_truck:
+                        cust = self.customer_position_both[TA_action - self.num_parcels_truck - 1]
+                        self.truck_masks[TA_action] = 0
+                    else:
+                        cust = self.customer_position_uav[TA_action - self.num_customer_truck - 1]
+                        self.truck_masks[TA_action] = 0
+                    self.truck_target_position = copy(cust)
+
+                else: 
+                    print(f'Wrong Action Form: {TA_action}')
+            # uav-case
+            else:
+                uav_no = self.current_carrier - 1
+                if self.uav_stages[uav_no] == -1:
+                    if isinstance(TA_action, np.int64) or isinstance(TA_action, np.int32) or isinstance(TA_action, int): 
+                        if TA_action != 0: # empty uav action
+                            self.infos['is_ready'][self.possible_agents[self.current_carrier]] = False
+                            self.last_dr = np.int64(TA_action)
+                            TA_action -= (1 + self.num_parcels_truck)
+                            self.uav_stages[uav_no] = 1
+                            self.available_carrier[self.current_carrier] = 0
+                            self.current_carrier = None
+                            
+                            if TA_action < self.num_customer_both:
+                                cust = copy(self.customer_position_both[TA_action])
+                            else:
+                                cust = copy(self.customer_position_uav[TA_action - self.num_customer_both])
+
+                            self.uav_target_positions[uav_no] = copy(cust)
+                            self.retrieve_target_positions[uav_no] = self.truck_position
+                            self.uav_masks[TA_action] = 0
+
+                    else: 
+                        print(f'Wrong Action Form: {TA_action}')
+        
+        # calculate uav mask based on the uav payload mask and the customer mask
+        uav_0_masks = self.uav0_load_masks * self.uav_masks
+        uav_1_masks = self.uav1_load_masks * self.uav_masks
+
+        self.has_available_uav_0 = uav_0_masks.any()
+        self.has_available_uav_1 = uav_1_masks.any()
+        if not self.has_available_uav_0:
+            for i in range(self.num_uavs_0):
+                self.available_carrier[i + 1] = 0
+        if not self.has_available_uav_1:
+            for i in range(self.num_uavs_1):
+                self.available_carrier[i + self.num_uavs_0 + 1] = 0
+
+        available_indices = np.flatnonzero(self.available_carrier)
+        self.current_carrier = available_indices[0] if available_indices.size > 0 else None # typically couldn't <= 0
+    
     
     # When the truck performs a new action, it first generates a refined path through genarate_truck_path(),
     # and then moves in truck_move() according to the generated path before reaching the target 
@@ -788,6 +833,7 @@ class DeliveryEnvironmentWithObstacle(ParallelEnv):
                                            else int(time_left * self.truck_velocity) * (-1))
                 time_left = 0
         if not self.truck_path:
+            self.available_carrier[0] = 1
             return True
         else:
             return False
@@ -863,15 +909,6 @@ class DeliveryEnvironmentWithObstacle(ParallelEnv):
         else:
             # print("uav not arrive!")
             return 0
-        
-        
-    def update_action_mask(self, agent, action):
-        # if match("truck", agent):
-        #     if action != 0:
-        #         self.truck_masks[action] = 0
-        # else:
-        #     self.uav_masks[action] = 0
-        pass
     
     
     # return if the dist between uav l and r is safe through this transition
@@ -924,6 +961,7 @@ class DeliveryEnvironmentWithObstacle(ParallelEnv):
         # collision infos only in the current step
         self.infos['collisions_with_obstacle'] = 0
         self.infos['collisions_with_uav'] = 0
+        self.infos['make_delivery'] = 0
         
         rewards = {
             agent: REWARD_URGENCY * self.step_len for agent in self.agents if match("uav", agent)
@@ -959,13 +997,16 @@ class DeliveryEnvironmentWithObstacle(ParallelEnv):
             self.infos['is_ready']["truck"] = True
             # calculate reward when arriving to target
             if np.array_equal(self.truck_position, self.warehouse_position):
-                if np.count_nonzero(self.action_masks) == 2:
+                if np.count_nonzero(self.action_masks) == 1:
                     rewards["truck"] += REWARD_VICTORY
                     self.infos['is_ready'].pop("truck")
                     # self.agents.remove("truck")
                     self.agents = []
+                    self.available_carrier[0] = 0
+                    self.current_carrier = None
             else:
                 rewards["truck"] += REWARD_DELIVERY                        
+                self.infos['make_delivery'] += 1
                 # else:
                 #     self.infos[agent]["IsReady"] = False # a little bit redundant
         
@@ -1006,12 +1047,15 @@ class DeliveryEnvironmentWithObstacle(ParallelEnv):
                             self.uav_stages[uav_no] -= 1
                         if self.uav_stages[uav_no] == -1:
                             self.infos['is_ready'][agent] = True
+                            if (uav_no < self.num_uavs_0 and self.has_available_uav_0) or (uav_no >= self.num_uavs_0 and self.has_available_uav_1):
+                                self.available_carrier[uav_no + 1] = 1
                             # charging after returning completion
                             self.uav_battery_remaining[uav_no] = self.uav_range[self.get_uav_info(agent)[0]]
                             if np.array_equal(self.uav_target_positions[uav_no], self.truck_target_position):
                                 self.infos['is_ready']["truck"] = True
                                 self.truck_path.clear()
-                        # else:
+                        else:
+                            self.infos['make_delivery'] += 1
                         #     self.uav_target_positions[uav_no] = self.truck_position
                         rewards[agent] += REWARD_UAV_ARRIVAL
                     elif uav_moving_result == -1:
@@ -1076,9 +1120,11 @@ class DeliveryEnvironmentWithObstacle(ParallelEnv):
         # Check termination conditions
         ####
         terminations = {a: False for a in self.agents}
-        if np.sum(self.uav_stages) == (-1) * self.num_uavs and np.array_equal(self.truck_position, self.warehouse_position) and np.count_nonzero(self.action_masks) == 2:
+        if np.sum(self.uav_stages) == (-1) * self.num_uavs and np.array_equal(self.truck_position, self.warehouse_position) and np.count_nonzero(self.action_masks) == 0:
             terminations = {a: True for a in self.agents}
             self.agents = []
+            self.available_carrier[0] = 0
+            self.current_carrier = None
 
         # Check truncation conditions (overwrites termination conditions)
         ####
@@ -1101,6 +1147,32 @@ class DeliveryEnvironmentWithObstacle(ParallelEnv):
         #     for agent in self.agents
         # }
         
+        available_indices = np.flatnonzero(self.available_carrier)
+        self.current_carrier = available_indices[0] if available_indices.size > 0 else None
+        
+        if self.current_carrier is None:
+            upper_observation = { "obs": np.zeros((self.num_parcels + 1, 2)), "mask": np.zeros((self.num_parcels + 1)), 'last': None }
+
+        else:
+            obs = np.concatenate([self.warehouse_position[np.newaxis, :], self.customer_position_truck, self.customer_position_both, self.customer_position_uav]) - self.truck_position
+            if self.current_carrier == 0:
+                action_mask = self.truck_masks
+                # to be modified
+                if self.uav_stages[0] == -1:
+                    last = self.last_tr
+                else:
+                    last = self.last_dr
+            elif self.current_carrier <= self.num_uavs_0:
+                # obs = np.concatenate((obs, np.zeros((self.num_parcels - obs.shape[0], 2))))
+                action_mask = np.concatenate((np.ones((1)), np.zeros((self.num_parcels_truck)), uav_0_masks))
+                last = self.last_tr
+            else:
+                action_mask = np.concatenate((np.ones((1)), np.zeros((self.num_parcels_truck)), uav_1_masks))
+                last = self.last_tr
+
+            upper_observation = { 'obs': obs, 'mask': action_mask, 'last': last }
+        
+        
         coordi = {
             agent: np.concatenate(
                 [
@@ -1120,12 +1192,7 @@ class DeliveryEnvironmentWithObstacle(ParallelEnv):
         # No big difference from the observations and action_masks at reset()
         observations = {
             agent: 
-                    dict({
-                        "pos_obs" : np.row_stack([[self.warehouse_position, self.truck_position], self.uav_position, 
-                                        self.customer_position_truck, self.customer_position_both, self.customer_position_uav]), 
-                        "truck_action_masks" : self.action_masks[1 : -1], 
-                        "uav_action_masks" : np.row_stack([uav_0_masks[ : -1], uav_1_masks[ : -1]])
-                    }) if match("truck", agent)
+                    upper_observation if match("truck", agent)
                     else dict({
                         "surroundings" : self.get_obs_by_uav(agent), 
                         "vecs" : coordi[agent].astype(np.int32)
@@ -1224,7 +1291,7 @@ class DeliveryEnvironmentWithObstacle(ParallelEnv):
         if self.screen is not None:
             pygame.quit()
             self.screen = None
-        return super().close()
+        return
 
 
 def get_image(path):
@@ -1237,5 +1304,15 @@ def get_image(path):
     sfc.blit(image, (0, 0))
     return sfc
 
+
 def cross_product_2d_array(v1, v2):
     return v1[0] * v2[1] - v2[0] * v1[1]
+
+
+if __name__ == "__main__":
+    env = DeliveryEnvironmentWithObstacle()
+    seed = 1_000
+    
+    env.reset(seed=seed)
+
+    env.close()

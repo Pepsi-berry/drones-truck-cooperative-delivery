@@ -290,6 +290,7 @@ class Attention(nn.Module):
                                           device=device, requires_grad=True))
 
         self.project_d = nn.Conv1d(in_channels=hidden_size, out_channels=hidden_size, kernel_size=1)
+        self.project_b = nn.Conv1d(in_channels=hidden_size, out_channels=hidden_size, kernel_size=1)        
         
         self.project_ref = nn.Conv1d(in_channels=hidden_size, out_channels=hidden_size, kernel_size=1)
         self.project_query = nn.Linear(hidden_size, hidden_size)
@@ -297,8 +298,10 @@ class Attention(nn.Module):
 
     def forward(self, static_hidden, dynamic_hidden, decoder_hidden):
         # [b_s, hidden_dim, n_nodes]
-    
-        d_ex = self.project_d(dynamic_hidden)
+
+        dynamic_d_hidden, dynamic_b_hidden = dynamic_hidden
+        d_ex = self.project_d(dynamic_d_hidden)
+        d_ex = d_ex + self.project_b(dynamic_b_hidden) if dynamic_b_hidden is not None else d_ex
         
         batch_size, hidden_size, n_nodes = static_hidden.size()
     
@@ -313,7 +316,7 @@ class Attention(nn.Module):
     
         # (batch_size, 1, n_nodes) -> (batch_size, n_nodes)
         u = torch.bmm(v, torch.tanh(e + q + d_ex )).squeeze(1)
-            
+        
         if self.use_tahn:
             logits = self.C * self.tanh(u)
         else:
@@ -549,13 +552,15 @@ class HMActor(nn.Module):
         # Define the encoder & decoder models
         # for static x, y coords 
         self.attention_encoder = AttentionModel(hidden_size, hidden_size)
-        self.dynamic_d_ex = Encoder(2, hidden_size)
+        self.dynamic_d_ex = Encoder(2, hidden_size) # encoder for position dynamic
+        self.dynamic_b_ex = Encoder(1, hidden_size) # encoder for battery dynamic
         self.decoder = Decoder(hidden_size, num_layers, dropout)
         # self.critic = Critic(hidden_size)
         
         if torch.cuda.is_available():
             self.attention_encoder = self.attention_encoder.cuda()
             self.dynamic_d_ex = self.dynamic_d_ex.cuda()
+            self.dynamic_b_ex = self.dynamic_b_ex.cuda()
             self.decoder = self.decoder.cuda()
             # self.critic = self.critic.cuda()
         self.softmax = nn.Softmax(dim=-1)
@@ -576,15 +581,18 @@ class HMActor(nn.Module):
         self, 
         dynamic, # (batch_size, n_node, feature_size=2(x, y))
         static_hidden, decoder_input, last_h, last_c, 
-        terminated=None, 
+        terminated, 
+        battery_dynamic=None, 
         mask=None, # (batch_size, n_nodes)
     ):
         # (batch_size, n_nodes, 1)
-        dynamic_hidden = self.dynamic_d_ex(dynamic.permute(0, 2, 1))
+        dynamic_d_hidden = self.dynamic_d_ex(dynamic.permute(0, 2, 1))
+        dynamic_b_hidden = self.dynamic_b_ex(battery_dynamic.permute(0, 2, 1)) if battery_dynamic is not None else None
+
         # (batch_size, hidden_dim, n_nodes) (*2)
         # (batch_size, hidden_dim, 1)
         # (num_layers, batch_size, hidden_dim)
-        logits, last_hidden = self.decoder(static_hidden, dynamic_hidden, decoder_input, (last_h, last_c))
+        logits, last_hidden = self.decoder(static_hidden, (dynamic_d_hidden, dynamic_b_hidden), decoder_input, (last_h, last_c))
         # (batch_size, n_nodes)
         last_h, last_c = last_hidden
         
@@ -601,8 +609,7 @@ class HMActor(nn.Module):
             prob, action = torch.max(probs, 1)  # Greedy (no explore)
             logp = prob.log()
         
-        if terminated is not None:
-            logp = logp * (1. - terminated)
+        logp = logp * (1. - terminated)
         
         # self.value_out = self.critic(dynamic.permute(0, 2, 1), mask.unsqueeze(2))
         

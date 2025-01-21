@@ -41,6 +41,7 @@ log/
 *.log
 *.sql
 *.sqlite
+*.txt
 # *.csv
 
 ### VisualStudioCode ###

@@ -538,7 +538,7 @@ class DeliveryEnvironmentWithObstacle():
         
         obs = np.concatenate([self.warehouse_position[np.newaxis, :], self.customer_position_truck, self.customer_position_both, self.customer_position_uav]) - self.truck_position
         upper_observation = {
-            "obs": obs, "mask": self.action_masks, 'last': 0, 
+            "obs": obs, "mask": self.action_masks, 'last': 0, 'battery': np.full(self.num_parcels + 1, 100_000, dtype=np.float32), 
             "pos_obs" : np.row_stack([[self.warehouse_position, self.truck_position], self.uav_position, 
                                 self.customer_position_truck, self.customer_position_both, self.customer_position_uav]), 
         }
@@ -1136,8 +1136,11 @@ class DeliveryEnvironmentWithObstacle():
 
         # Get observations
         ####
-        uav_0_masks = self.uav0_load_masks * self.uav_masks
-        uav_1_masks = self.uav1_load_masks * self.uav_masks
+        uav_dist = np.linalg.norm(np.concatenate([self.customer_position_both, self.customer_position_uav]) - self.truck_position, axis=1)
+        uav_range_mask_0 = np.where(uav_dist < self.uav_range[0]*0.5, 1, 0)
+        uav_range_mask_1 = np.where(uav_dist < self.uav_range[1]*0.5, 1, 0)
+        uav_0_masks = self.uav0_load_masks * self.uav_masks * uav_range_mask_0
+        uav_1_masks = self.uav1_load_masks * self.uav_masks * uav_range_mask_1
 
         # current_action_masks = {
         #     agent: (self.truck_masks if match("truck", agent)
@@ -1151,7 +1154,7 @@ class DeliveryEnvironmentWithObstacle():
         self.current_carrier = available_indices[0] if available_indices.size > 0 else None
         
         if self.current_carrier is None:
-            upper_observation = { "obs": np.zeros((self.num_parcels + 1, 2)), "mask": np.zeros((self.num_parcels + 1)), 'last': None }
+            upper_observation = { "obs": np.zeros((self.num_parcels + 1, 2)), "mask": np.zeros((self.num_parcels + 1)), 'last': None, 'battery': np.full(self.num_parcels + 1, 100_000, dtype=np.float32) }
 
         else:
             obs = np.concatenate([self.warehouse_position[np.newaxis, :], self.customer_position_truck, self.customer_position_both, self.customer_position_uav]) - self.truck_position
@@ -1162,15 +1165,18 @@ class DeliveryEnvironmentWithObstacle():
                     last = self.last_tr
                 else:
                     last = self.last_dr
+                carrier_range = 100_000
             elif self.current_carrier <= self.num_uavs_0:
                 # obs = np.concatenate((obs, np.zeros((self.num_parcels - obs.shape[0], 2))))
                 action_mask = np.concatenate((np.ones((1)), np.zeros((self.num_parcels_truck)), uav_0_masks))
                 last = self.last_tr
+                carrier_range = self.uav_range[0] * 0.5
             else:
                 action_mask = np.concatenate((np.ones((1)), np.zeros((self.num_parcels_truck)), uav_1_masks))
                 last = self.last_tr
+                carrier_range = self.uav_range[1] * 0.5
 
-            upper_observation = { 'obs': obs, 'mask': action_mask, 'last': last }
+            upper_observation = { 'obs': obs, 'mask': action_mask, 'last': last, 'battery': np.full(self.num_parcels + 1, carrier_range, dtype=np.float32) }
         
         
         coordi = {
@@ -1313,6 +1319,6 @@ if __name__ == "__main__":
     env = DeliveryEnvironmentWithObstacle()
     seed = 1_000
     
-    env.reset(seed=seed)
+    obs, info = env.reset(seed=seed)
 
     env.close()

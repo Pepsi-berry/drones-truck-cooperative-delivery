@@ -581,8 +581,8 @@ class HMActor(nn.Module):
         self, 
         dynamic, # (batch_size, n_node, feature_size=2(x, y))
         static_hidden, decoder_input, last_h, last_c, 
-        terminated, 
-        battery_dynamic=None, 
+        terminated=None, 
+        battery_dynamic=None, # (batch_size, n_node, feature_size=1(battery_capacity))
         mask=None, # (batch_size, n_nodes)
     ):
         # (batch_size, n_nodes, 1)
@@ -609,7 +609,8 @@ class HMActor(nn.Module):
             prob, action = torch.max(probs, 1)  # Greedy (no explore)
             logp = prob.log()
         
-        logp = logp * (1. - terminated)
+        if terminated is not None:
+            logp = logp * (1. - terminated)
         
         # self.value_out = self.critic(dynamic.permute(0, 2, 1), mask.unsqueeze(2))
         

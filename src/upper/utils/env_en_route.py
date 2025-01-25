@@ -573,16 +573,15 @@ class UpperSolverTrainingEnvironment():
                         break
                 
             else:
-                for _ in range(2):
-                    # truck moves
-                    # in the first movement, a refined path needs to be generated.
-                    if not self.truck_path[i]:
-                        self.truck_path[i] = self.genarate_truck_path(truck_pos, truck_target_pos)
-                    self.truck_move(truck_pos, self.truck_path[i], avai_carrier)
+                # truck moves
+                # in the first movement, a refined path needs to be generated.
+                if not self.truck_path[i]:
+                    self.truck_path[i] = self.genarate_truck_path(truck_pos, truck_target_pos)
+                self.truck_move(truck_pos, self.truck_path[i], avai_carrier)
 
-                    self.uav_move(uav_stage, truck_pos, uav_pos, uav_target_pos, avai_carrier)
-                    
-                    self.time_step[i] += 1
+                self.uav_move(uav_stage, truck_pos, uav_pos, uav_target_pos, avai_carrier)
+                
+                self.time_step[i] += 1
         
         # update the next assigned carrier:current_carrier after moving
         mask_uav_0 = self.mask_uav_0 * self.mask[:, self.num_customer_truck:]
@@ -761,8 +760,8 @@ def get_image(path):
 def env_creator(env_config={}):
     env = UpperSolverTrainingEnvironment(
         MAX_STEP=env_config.get("MAX_STEP", 2_000), 
-        step_len=env_config.get("step_len", 5), 
-        truck_velocity=env_config.get("truck_velocity", 6), 
+        step_len=env_config.get("step_len", 10), 
+        truck_velocity=env_config.get("truck_velocity", 7), 
         uav_velocity=env_config.get("uav_velocity", np.array([12, 29])), 
         uav_capacity=env_config.get("uav_capacity", np.array([10, 3.6])), 
         uav_range=env_config.get("uav_range", np.array([10_000, 15_000]) * 0.6), 
@@ -789,7 +788,7 @@ if __name__ == '__main__':
     
     action = np.full(batch_size, -1) 
     
-    for idx in range(30):
+    for idx in range(20):
         for i in range(batch_size):
             nonzero_indices = np.flatnonzero(mask[i]) 
             if nonzero_indices.size > 0:

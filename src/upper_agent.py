@@ -72,8 +72,9 @@ class UpperAgent(object):
                 terminated = torch.from_numpy(ter.astype(np.float32)).to(device)
                 mask = torch.from_numpy(mask.astype(np.float32)).to(device)
                 dynamic = torch.from_numpy(obs.astype(np.float32)).to(device)
+                dynamic_b = torch.from_numpy(env.get_battery_dynamic().astype(np.float32)).to(device)
                 decoder_input =  torch.gather(static_hidden, 2, last.view(-1, 1, 1).expand(env.batch_size, args['hidden_dim'], 1)).detach()
-                action, prob, logp, hx, cx = actor.forward(dynamic, static_hidden, decoder_input, hx, cx, terminated, mask)
+                action, prob, logp, hx, cx = actor.forward(dynamic, static_hidden, decoder_input, hx, cx, terminated, battery_dynamic=dynamic_b, mask=mask)
                 logs.append(logp.unsqueeze(1))
                 actions.append(action.unsqueeze(1))
                 probs.append(prob.unsqueeze(1))
@@ -131,19 +132,22 @@ class UpperAgent(object):
 
 
     def select_single_action(self, state, static_hidden=None, hidden=None):
-        obs = state['obs']
-        mask = state['mask']
-        last = state['last']
+        obs = state['obs'] # (n_nodes, 2)
+        mask = state['mask'] # (n_nodes, )
+        last = state['last'] # (1, )
+        battery = state['battery'] # (n_nodes, )
         if obs.ndim == 2:
             # add batch dimension (or use np.expand_dims(arr, axis=0))
             obs = obs[np.newaxis, ...]
             mask = mask[np.newaxis, ...]
+            battery = battery[np.newaxis, :, np.newaxis]
         
         actor = self.actor
         with torch.no_grad():
             # prepare input 
             obs = torch.from_numpy(obs.astype(np.float32)).to(device)
             mask = torch.from_numpy(mask.astype(np.float32)).to(device)
+            battery = torch.from_numpy(battery.astype(np.float32)).to(device)
             # [b_s, hidden_dim, n_nodes]
             if static_hidden is None:
                 static_hidden = actor.emd_stat(obs)
@@ -153,7 +157,7 @@ class UpperAgent(object):
                 hidden = (torch.zeros(1, 1, self.args['hidden_dim']).to(device), torch.zeros(1, 1, self.args['hidden_dim']).to(device))
             hx, cx = hidden
             
-            action, prob, logp, hx, cx = actor.forward(obs, static_hidden, decoder_input, hx, cx, mask=mask)
+            action, prob, logp, hx, cx = actor.forward(obs, static_hidden, decoder_input, hx, cx, battery_dynamic=battery, mask=mask)
                 
         return action, static_hidden, (hx, cx)
     
@@ -185,8 +189,9 @@ class UpperAgent(object):
                 terminated = torch.from_numpy(ter.astype(np.float32)).to(device)
                 mask = torch.from_numpy(mask.astype(np.float32)).to(device)
                 dynamic = torch.from_numpy(obs.astype(np.float32)).to(device)
+                dynamic_b = torch.from_numpy(env.get_battery_dynamic().astype(np.float32)).to(device)
                 decoder_input =  torch.gather(static_hidden, 2, last.view(-1, 1, 1).expand(env.batch_size, args['hidden_dim'], 1)).detach()
-                action, prob, logp, hx, cx = actor.forward(dynamic, static_hidden, decoder_input, hx, cx, terminated, mask)
+                action, prob, logp, hx, cx = actor.forward(dynamic, static_hidden, decoder_input, hx, cx, terminated, battery_dynamic=dynamic_b, mask=mask)
                 
                 state, reward, ter, _, _ = env.step(action.cpu().numpy())
                 if np.all(ter):

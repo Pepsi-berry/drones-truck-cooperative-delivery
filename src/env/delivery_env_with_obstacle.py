@@ -128,30 +128,14 @@ class DeliveryEnvironmentWithObstacle():
         self.num_uav_obstacle = num_uav_obstacle
         self.num_no_fly_zone = num_no_fly_zone
         
-        # self.possible_agents = ["truck", 
-        #                         # "upper_solver"
-        #                         "uav_0_0", "uav_0_1", 
-        #                         "uav_1_0", "uav_1_1", 
-        #                         # "uav_1_2", "uav_1_3", 
-        #                         ]
-        
         # mapping uav_no to uav_name
         self.possible_agents = ["truck"] + ["uav_0_" + str(i) for i in range(self.num_uavs_0)] + ["uav_1_" + str(i) for i in range(self.num_uavs_1)]
         # mapping uav_name to uav_no
         self.uav_name_mapping = dict(zip([agent for agent in self.possible_agents if match("uav", agent)],
                                          list(range(self.num_uavs))))
-        # self.uav_no_mapping = [agent for agent in self.possible_agents if match("uav", agent)]
         # The action space of the truck is, choosing a meaningful target point to go to
         # that is warehouse point or customer points which truck can delivery
         # the action space of the uav is moving in any direction and the moving speed
-        # self.action_spaces = {
-        #     agent: (
-        #         Discrete(self.num_customer_truck + 1) if match("truck", agent) 
-        #         else Box(low=-1, high=1, 
-        #                  shape=(2, ), dtype=np.float32)
-        #     ) 
-        #     for agent in self.possible_agents
-        # }
         
         ##########################################################################################
         # agent positions, warehouse positions, customer positions, 
@@ -165,10 +149,6 @@ class DeliveryEnvironmentWithObstacle():
         self.uav_target_positions = None
         self.retrieve_target_positions = None
         self.truck_target_position = None
-        # self.uav_dist = None
-        # self.uav_target_dist = None
-        # self.uav_target_angle_sin = None
-        # self.uav_target_angle_cos = None
         self.truck_path = None
 
         # 0 means truck, 1-num_uavs means uav
@@ -421,11 +401,6 @@ class DeliveryEnvironmentWithObstacle():
         # set the time step to 0 initially
         self.time_step = 0
         # Initially, all UAVs are in state of loaded in truck
-        # self.agents = ["truck", 
-        #                "uav_0_0", "uav_0_1", 
-        #                "uav_1_0", "uav_1_1", 
-        #             #    "uav_1_2", "uav_1_3", 
-        #                ]
         self.agents = self.possible_agents.copy()
         self.dead_agent_list = []
         self.uav_stages = np.ones(self.num_uavs) * (-1)
@@ -433,8 +408,6 @@ class DeliveryEnvironmentWithObstacle():
         self.available_carrier = np.ones(self.num_uavs + 1)
         available_indices = np.flatnonzero(self.available_carrier)
         self.current_carrier = available_indices[0] if available_indices.size > 0 else None
-        self.has_available_uav_0 = True
-        self.has_available_uav_1 = True
 
         # The warehouse is located in the center of the map
         self.warehouse_position = np.array([self.map_size / 2, self.map_size / 2], dtype=np.int32)
@@ -527,14 +500,6 @@ class DeliveryEnvironmentWithObstacle():
         
         self.last_tr = 0
         self.last_dr = 0
-
-        # current_action_masks = {
-        #     agent: (self.truck_masks if match("truck", agent)
-        #             else uav_0_masks if match("uav_0", agent)
-        #             else uav_1_masks if match("uav_1", agent)
-        #             else None)
-        #     for agent in self.possible_agents
-        # }
         
         obs = np.concatenate([self.warehouse_position[np.newaxis, :], self.customer_position_truck, self.customer_position_both, self.customer_position_uav]) - self.truck_position
         upper_observation = {
@@ -546,23 +511,11 @@ class DeliveryEnvironmentWithObstacle():
         observations = {
             agent: 
                     upper_observation if match("truck", agent)
-                    # else np.row_stack([self.truck_position, self.truck_position, 
-                    #                    np.array([[self.get_uav_info(agent)[2], self.uav_velocity[self.get_uav_info(agent)[0]]], 
-                    #                              [DIST_RESTRICT_UAV, DIST_RESTRICT_OBSTACLE]]), 
-                    #                    self.uav_position, np.array([obstacle[0] for obstacle in self.uav_obstacles]), 
-                    #                    self.no_fly_zones[:, 0], self.no_fly_zones[:, 1]])
                     else dict({
                         "surroundings" : self.get_obs_by_uav(agent), 
-                        # "vecs" : np.row_stack([self.uav_position[self.uav_name_mapping[agent]], 
-                        #                               self.truck_position, self.truck_position])
                         "vecs" : np.zeros(4).astype(np.int32)
-                            # np.concatenate([
-                            # self.truck_position - self.uav_position[self.uav_name_mapping[agent]], 
-                            # self.truck_position - self.truck_position
-                            # ]).astype(np.int32)
                     })
                 
-                # "action_mask": current_action_masks[agent]
                     for agent in self.agents
         }
         
@@ -709,22 +662,6 @@ class DeliveryEnvironmentWithObstacle():
 
                     else: 
                         print(f'Wrong Action Form: {TA_action}')
-        
-        # calculate uav mask based on the uav payload mask and the customer mask
-        uav_0_masks = self.uav0_load_masks * self.uav_masks
-        uav_1_masks = self.uav1_load_masks * self.uav_masks
-
-        self.has_available_uav_0 = uav_0_masks.any()
-        self.has_available_uav_1 = uav_1_masks.any()
-        if not self.has_available_uav_0:
-            for i in range(self.num_uavs_0):
-                self.available_carrier[i + 1] = 0
-        if not self.has_available_uav_1:
-            for i in range(self.num_uavs_1):
-                self.available_carrier[i + self.num_uavs_0 + 1] = 0
-
-        available_indices = np.flatnonzero(self.available_carrier)
-        self.current_carrier = available_indices[0] if available_indices.size > 0 else None # typically couldn't <= 0
     
     
     # When the truck performs a new action, it first generates a refined path through genarate_truck_path(),
@@ -983,7 +920,7 @@ class DeliveryEnvironmentWithObstacle():
         if not self.truck_path:
             self.genarate_truck_path(self.truck_target_position)
             # self.update_action_mask(agent, self.truck_target_position)
-        if actions and self.truck_move():
+        if actions and self.truck_move(): # actions?
             # Due to the design in TA_Scheduling, the truck may not modify the action_mask  when TA
             # so the modify operation is supplemented when the delivery is completed.
             idx = np.where((self.customer_position_both == self.truck_target_position).all(axis=1))[0]
@@ -997,7 +934,7 @@ class DeliveryEnvironmentWithObstacle():
             self.infos['is_ready']["truck"] = True
             # calculate reward when arriving to target
             if np.array_equal(self.truck_position, self.warehouse_position):
-                if np.count_nonzero(self.action_masks) == 1:
+                if np.count_nonzero(self.action_masks) == 0:
                     rewards["truck"] += REWARD_VICTORY
                     self.infos['is_ready'].pop("truck")
                     # self.agents.remove("truck")
@@ -1047,8 +984,7 @@ class DeliveryEnvironmentWithObstacle():
                             self.uav_stages[uav_no] -= 1
                         if self.uav_stages[uav_no] == -1:
                             self.infos['is_ready'][agent] = True
-                            if (uav_no < self.num_uavs_0 and self.has_available_uav_0) or (uav_no >= self.num_uavs_0 and self.has_available_uav_1):
-                                self.available_carrier[uav_no + 1] = 1
+                            self.available_carrier[uav_no + 1] = 1
                             # charging after returning completion
                             self.uav_battery_remaining[uav_no] = self.uav_range[self.get_uav_info(agent)[0]]
                             if np.array_equal(self.uav_target_positions[uav_no], self.truck_target_position):
@@ -1141,16 +1077,17 @@ class DeliveryEnvironmentWithObstacle():
         uav_range_mask_1 = np.where(uav_dist < self.uav_range[1]*0.5, 1, 0)
         uav_0_masks = self.uav0_load_masks * self.uav_masks * uav_range_mask_0
         uav_1_masks = self.uav1_load_masks * self.uav_masks * uav_range_mask_1
-
-        # current_action_masks = {
-        #     agent: (self.truck_masks if match("truck", agent)
-        #             else uav_0_masks if match("uav_0", agent)
-        #             else uav_1_masks if match("uav_1", agent)
-        #             else None)
-        #     for agent in self.agents
-        # }
         
-        available_indices = np.flatnonzero(self.available_carrier)
+        no_available_uav_0 = np.all(uav_0_masks == 0)
+        no_available_uav_1 = np.all(uav_1_masks == 0)
+        
+        avail_carrier = self.available_carrier.copy()
+        if no_available_uav_0:
+            avail_carrier[1: self.num_uavs_0 + 1] = 0
+        if no_available_uav_1:
+            avail_carrier[self.num_uavs_0 + 1 :] = 0
+        
+        available_indices = np.flatnonzero(avail_carrier)
         self.current_carrier = available_indices[0] if available_indices.size > 0 else None
         
         if self.current_carrier is None:
@@ -1167,12 +1104,11 @@ class DeliveryEnvironmentWithObstacle():
                     last = self.last_dr
                 carrier_range = 100_000
             elif self.current_carrier <= self.num_uavs_0:
-                # obs = np.concatenate((obs, np.zeros((self.num_parcels - obs.shape[0], 2))))
-                action_mask = np.concatenate((np.ones((1)), np.zeros((self.num_parcels_truck)), uav_0_masks))
+                action_mask = np.concatenate((np.zeros((1)), np.zeros((self.num_parcels_truck)), uav_0_masks))
                 last = self.last_tr
                 carrier_range = self.uav_range[0] * 0.5
             else:
-                action_mask = np.concatenate((np.ones((1)), np.zeros((self.num_parcels_truck)), uav_1_masks))
+                action_mask = np.concatenate((np.zeros((1)), np.zeros((self.num_parcels_truck)), uav_1_masks))
                 last = self.last_tr
                 carrier_range = self.uav_range[1] * 0.5
 
@@ -1204,7 +1140,6 @@ class DeliveryEnvironmentWithObstacle():
                         "vecs" : coordi[agent].astype(np.int32)
                     })
                     
-                # "action_mask": current_action_masks[agent]
                     for agent in self.agents
         }
 

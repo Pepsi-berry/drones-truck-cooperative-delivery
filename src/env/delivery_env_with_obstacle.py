@@ -757,9 +757,9 @@ class DeliveryEnvironmentWithObstacle():
             if time_left == 0:
                 break
             if abs(self.truck_position[0] + self.truck_position[1] - self.truck_path[0][0] - self.truck_path[0][1]) <= self.truck_velocity * time_left:
+                time_left -= np.sum(np.abs(self.truck_position - self.truck_path[0])) / float(self.truck_velocity)
                 self.truck_position[0] = self.truck_path[0][0]
                 self.truck_position[1] = self.truck_path[0][1]
-                time_left -= abs(self.truck_position[0] + self.truck_position[1] - self.truck_path[0][0] - self.truck_path[0][1]) / float(self.truck_velocity)
                 self.truck_path.pop(0)
             elif self.truck_position[0] == self.truck_path[0][0]:
                 self.truck_position[1] += (int(time_left * self.truck_velocity) if self.truck_position[1] < self.truck_path[0][1] 

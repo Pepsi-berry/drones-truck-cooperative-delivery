@@ -225,8 +225,10 @@ class UpperSolverTrainingEnvironment():
         
         self.last = np.zeros(self.batch_size) 
         
+        obs_t = np.concatenate([self.warehouse_position[:, np.newaxis, :], self.customer_position_truck], axis=1) - self.truck_position[:, np.newaxis, :] 
+        obs_b = self.customer_position_both - self.truck_position[:, np.newaxis, :] 
         obs = np.concatenate([self.warehouse_position[:, np.newaxis, :], self.customer_position_truck, self.customer_position_both], axis=1) - self.truck_position[:, np.newaxis, :] 
-        observation = { 'obs': obs, 'mask': np.concatenate((np.zeros((self.batch_size, 1)), self.mask), axis=1), 'last': self.last.astype(np.int64) } 
+        observation = { 'obs': obs, 'obs_t': obs_t, 'obs_b': obs_b, 'mask': np.concatenate((np.zeros((self.batch_size, 1)), self.mask), axis=1), 'last': self.last.astype(np.int64) } 
         
         # # Get dummy info. Necessary for proper parallel_to_aec conversion
         
@@ -325,9 +327,9 @@ class UpperSolverTrainingEnvironment():
             if time_left == 0:
                 break
             if abs(truck_position[0] + truck_position[1] - truck_path[0][0] - truck_path[0][1]) <= self.truck_velocity * time_left:
+                time_left -= np.sum(np.abs(truck_position - truck_path[0])) / float(self.truck_velocity)
                 truck_position[0] = truck_path[0][0]
                 truck_position[1] = truck_path[0][1]
-                time_left -= abs(truck_position[0] + truck_position[1] - truck_path[0][0] - truck_path[0][1]) / float(self.truck_velocity)
                 truck_path.pop(0)
             elif truck_position[0] == truck_path[0][0]:
                 truck_position[1] += (int(time_left * self.truck_velocity) if truck_position[1] < truck_path[0][1] 
@@ -369,6 +371,9 @@ class UpperSolverTrainingEnvironment():
                     if uav_stage[uav_no] == -1:
                         # mark this uav as available
                         available_carrier[uav_no + 1] = 1
+                    #     print(f'UAV INFO: uav {uav_no} arrived at truck {uav_positions} in timestep {self.time_step}')
+                    # else:
+                    #     print(f'UAV INFO: uav {uav_no} arrived at target {uav_positions} in timestep {self.time_step}')
                 else:
                     normed_vec = vec / dist
 
@@ -446,7 +451,7 @@ class UpperSolverTrainingEnvironment():
                 else:
                     cust = cust_pos_both[act - self.num_customer_truck]
                 truck_target_pos[:] = copy(cust)
-                # print(f'assign task {i, act} "{cust}" to truck in timestep {self.time_step[i]}')
+                # print(f'Truck INFO: assign task {i, act} "{cust}" to truck in timestep {self.time_step[i]} (distance: {np.sum(np.abs(cust - self.truck_position[i]))})')
                 mask[act] = 0
 
             else: 
@@ -501,7 +506,7 @@ class UpperSolverTrainingEnvironment():
                         cust = cust_pos_both[avail_uav_task]
 
                         uav_target_pos[avail_uav] = copy(cust)
-                        # print(f'assign task {i, avail_uav_task + self.num_customer_truck} "{cust}" to uav {avail_uav} in timestep {self.time_step[i]}')
+                        # print(f'UAV INFO: assign task {i, avail_uav_task + self.num_customer_truck} "{cust}" to uav {avail_uav} in timestep {self.time_step[i]} (distance: {np.linalg.norm(cust - truck_pos)})')
                         mask[avail_uav_task + self.num_customer_truck] = 0
 
         info = {}
@@ -547,11 +552,13 @@ class UpperSolverTrainingEnvironment():
 
         # Get observation
         ####
+        obs_t = np.concatenate([self.warehouse_position[:, np.newaxis, :], self.customer_position_truck], axis=1) - self.truck_position[:, np.newaxis, :] 
+        obs_b = self.customer_position_both - self.truck_position[:, np.newaxis, :] 
         obs = np.concatenate([self.warehouse_position[:, np.newaxis, :], self.customer_position_truck, self.customer_position_both], axis=1) - self.truck_position[:, np.newaxis, :]
         action_mask = np.concatenate((np.zeros((self.batch_size, 1)), self.mask), axis=1)
         
         # No big difference from the observation at reset()
-        observation = { 'obs': obs, 'mask': action_mask, 'last': self.last.astype(np.int64) }
+        observation = { 'obs': obs, 'obs_t': obs_t, 'obs_b': obs_b, 'mask': action_mask, 'last': self.last.astype(np.int64) }
         
         return observation, reward, self.termination, truncation, info
     
@@ -665,7 +672,7 @@ def env_creator(env_config={}):
 
 if __name__ == '__main__':
     env = env_creator()
-    batch_size = 128
+    batch_size = 1
     random_seed = random.randint(0, 100_000)
     print("# Set random seed to %d" % random_seed)
     observation, _ = env.reset(seed=random_seed, batch_size=batch_size)

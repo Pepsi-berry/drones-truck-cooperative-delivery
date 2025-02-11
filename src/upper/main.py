@@ -3,7 +3,7 @@ import os
 import torch 
 import random
 from utils.options import ParseParams
-from utils.env_en_route import env_creator
+from utils.env_decoupled import env_creator
 from model.hybrid_model import HMActor, Critic
 from utils.trainer import A2CTrainer
 

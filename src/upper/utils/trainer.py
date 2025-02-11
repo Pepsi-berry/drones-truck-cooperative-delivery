@@ -41,6 +41,9 @@ class A2CTrainer(object):
             
             state, _ = env.reset(batch_size=args['batch_size'])
             obs = state['obs']
+            priority = state['priority']
+            # obs_t = state['obs_t']
+            # obs_b = state['obs_b']
             mask = state['mask']
             last = torch.from_numpy(state['last']).to(device)
             
@@ -71,9 +74,11 @@ class A2CTrainer(object):
                 terminated = torch.from_numpy(ter.astype(np.float32)).to(device)
                 mask = torch.from_numpy(mask.astype(np.float32)).to(device)
                 dynamic = torch.from_numpy(obs.astype(np.float32)).to(device)
-                dynamic_b = torch.from_numpy(env.get_battery_dynamic().astype(np.float32)).to(device)
+                dynamic_priority = torch.from_numpy(priority.astype(np.float32)).to(device)
+                # dynamic_t = torch.from_numpy(obs_t.astype(np.float32)).to(device)
+                # dynamic_b = torch.from_numpy(obs_b.astype(np.float32)).to(device)
                 decoder_input =  torch.gather(static_hidden, 2, last.view(-1, 1, 1).expand(env.batch_size, args['hidden_dim'], 1)).detach()
-                action, prob, logp, hx, cx = actor.forward(dynamic, static_hidden, decoder_input, hx, cx, terminated, battery_dynamic=dynamic_b, mask=mask)
+                action, prob, logp, hx, cx = actor.forward(dynamic, static_hidden, decoder_input, hx, cx, terminated, priority_dynamic=dynamic_priority, mask=mask)
                 logs.append(logp.unsqueeze(1))
                 actions.append(action.unsqueeze(1))
                 probs.append(prob.unsqueeze(1))
@@ -82,6 +87,9 @@ class A2CTrainer(object):
                 if np.all(ter):
                     break
                 obs = state['obs']
+                priority = state['priority']
+                # obs_t = state['obs_t']
+                # obs_b = state['obs_b']
                 mask = state['mask']
                 last = torch.from_numpy(state['last']).to(device)
                 
@@ -99,9 +107,9 @@ class A2CTrainer(object):
 
             actor_optim.zero_grad()
             actor_loss.backward()
-            
             torch.nn.utils.clip_grad_norm_(actor.parameters(), args['max_grad_norm'])
             actor_optim.step()
+            
             critic_optim.zero_grad()
             critic_loss.backward()
             torch.nn.utils.clip_grad_norm_(critic.parameters(), args['max_grad_norm'])
@@ -135,6 +143,9 @@ class A2CTrainer(object):
         env = self.env 
         state, _ = env.reset(seed=self.test_seed, batch_size=args['test_size'])
         obs = state['obs']
+        priority = state['priority']
+        # obs_t = state['obs_t']
+        # obs_b = state['obs_b']
         mask = state['mask']
         last = torch.from_numpy(state['last']).to(device)
         actor = self.actor
@@ -157,14 +168,19 @@ class A2CTrainer(object):
                 terminated = torch.from_numpy(ter.astype(np.float32)).to(device)
                 mask = torch.from_numpy(mask.astype(np.float32)).to(device)
                 dynamic = torch.from_numpy(obs.astype(np.float32)).to(device)
-                dynamic_b = torch.from_numpy(env.get_battery_dynamic().astype(np.float32)).to(device)
+                dynamic_priority = torch.from_numpy(priority.astype(np.float32)).to(device)
+                # dynamic_t = torch.from_numpy(obs_t.astype(np.float32)).to(device)
+                # dynamic_b = torch.from_numpy(obs_b.astype(np.float32)).to(device)
                 decoder_input =  torch.gather(static_hidden, 2, last.view(-1, 1, 1).expand(env.batch_size, args['hidden_dim'], 1)).detach()
-                action, prob, logp, hx, cx = actor.forward(dynamic, static_hidden, decoder_input, hx, cx, terminated, battery_dynamic=dynamic_b, mask=mask)
-                
+                action, prob, logp, hx, cx = actor.forward(dynamic, static_hidden, decoder_input, hx, cx, terminated, priority_dynamic=dynamic_priority, mask=mask)
+
                 state, reward, ter, _, _ = env.step(action.cpu().numpy())
                 if np.all(ter):
                     break
                 obs = state['obs']
+                priority = state['priority']
+                # obs_t = state['obs_t']
+                # obs_b = state['obs_b']
                 mask = state['mask']
                 last = torch.from_numpy(state['last']).to(device)
                 

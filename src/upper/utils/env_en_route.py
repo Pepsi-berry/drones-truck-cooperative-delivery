@@ -331,9 +331,9 @@ class UpperSolverTrainingEnvironment():
             if time_left == 0:
                 break
             if abs(truck_position[0] + truck_position[1] - truck_path[0][0] - truck_path[0][1]) <= self.truck_velocity * time_left:
+                time_left -= np.sum(np.abs(truck_position - truck_path[0])) / float(self.truck_velocity)
                 truck_position[0] = truck_path[0][0]
                 truck_position[1] = truck_path[0][1]
-                time_left -= abs(truck_position[0] + truck_position[1] - truck_path[0][0] - truck_path[0][1]) / float(self.truck_velocity)
                 truck_path.pop(0)
             elif truck_position[0] == truck_path[0][0]:
                 truck_position[1] += (int(time_left * self.truck_velocity) if truck_position[1] < truck_path[0][1] 
@@ -552,21 +552,21 @@ class UpperSolverTrainingEnvironment():
                         
                         if np.any(mask_uav_retrieved):
                             completed = True
-                    # elif np.any(uav_stage == -1):
-                    #     current_mask_uav_0 = self.mask_uav_0[i] * self.mask[i, self.num_customer_truck:]
-                    #     current_mask_uav_1 = self.mask_uav_1[i] * self.mask[i, self.num_customer_truck:]
-                    #     if self.mask_range:
-                    #         current_mask_uav_0 = current_mask_uav_0 * self.get_range_mask_by_id_type(i, 0)
-                    #         current_mask_uav_1 = current_mask_uav_1 * self.get_range_mask_by_id_type(i, 1)
+                    elif np.any(uav_stage == -1):
+                        current_mask_uav_0 = self.mask_uav_0[i] * self.mask[i, self.num_customer_truck:]
+                        current_mask_uav_1 = self.mask_uav_1[i] * self.mask[i, self.num_customer_truck:]
+                        if self.mask_range:
+                            current_mask_uav_0 = current_mask_uav_0 * self.get_range_mask_by_id_type(i, 0)
+                            current_mask_uav_1 = current_mask_uav_1 * self.get_range_mask_by_id_type(i, 1)
                         
-                    #     no_available_uav_0 = np.all(current_mask_uav_0 == 0)
-                    #     no_available_uav_1 = np.all(current_mask_uav_1 == 0)
-                    #     current_avail_carrier = avai_carrier.copy()
-                    #     current_avail_carrier[no_available_uav_0, 1: self.num_uavs_0 + 1] = 0
-                    #     current_avail_carrier[no_available_uav_1, self.num_uavs_0 + 1 :] = 0
+                        no_available_uav_0 = np.all(current_mask_uav_0 == 0)
+                        no_available_uav_1 = np.all(current_mask_uav_1 == 0)
+                        current_avail_carrier = avai_carrier.copy()
+                        current_avail_carrier[no_available_uav_0, 1: self.num_uavs_0 + 1] = 0
+                        current_avail_carrier[no_available_uav_1, self.num_uavs_0 + 1 :] = 0
 
-                    #     if current_avail_carrier.any():
-                    #         completed = True
+                        if current_avail_carrier.any():
+                            completed = True
                     
                     self.time_step[i] += 1
                     if completed: 
